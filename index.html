@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Convergence</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<div class="app">
+		<aside class="sidebar" id="sidebar">
+			<div class="brand" data-act="nav" data-page="home">
+				<div class="brand-mark">C</div>
+				<div>
+					<div class="brand-name">Convergence</div>
+					<div class="brand-sub">Y-DNA Lineage Reconstruction</div>
+				</div>
+			</div>
+
+			<div class="side-section">
+				<div class="side-head">
+					<span>Ancestors</span>
+					<button class="icon-btn" data-act="add-ancestor" title="Add ancestor">+</button>
+				</div>
+				<input id="q" class="side-search" type="search" placeholder="Search ancestors">
+				<div id="ancestor-list" class="ancestor-list"></div>
+			</div>
+
+			<nav class="side-section side-nav">
+				<div class="side-head"><span>Tools</span></div>
+				<a data-act="nav" data-page="calcs">Quick Calculators</a>
+				<a data-act="nav" data-page="autosomal">Autosomal DNA Tools</a>
+				<a data-act="nav" data-page="settings">Settings &amp; Backup</a>
+			</nav>
+		</aside>
+
+		<div class="scrim" data-act="close-menu"></div>
+
+		<div class="main-wrap">
+			<header class="topbar">
+				<button class="menu-btn" data-act="open-menu" aria-label="Open menu">&#9776;</button>
+				<div id="crumb" class="crumb"></div>
+				<div id="saved" class="saved"></div>
+			</header>
+			<main id="main" class="main"></main>
+		</div>
+	</div>
+	<script src="app.js"></script>
+</body>
+</html>
