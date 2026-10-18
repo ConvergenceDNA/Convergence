@@ -10,7 +10,7 @@ function checklistHTML(kind, record) {
   const checks = record.checks || {};
   let total = 0, done = 0;
   const sections = cl.sections.map((s, si) => `<div class="check-sec"><h3>${esc(s[0])}</h3>${s[1].map((it, ii) => {
-    const key = `${si}.${ii}`;
+    const key = `${kind === 'autosomal' ? 'a' : ''}${si}.${ii}`;
     total++;
     if (checks[key]) done++;
     return `<label class="check-item"><input type="checkbox" data-check="${key}"${checks[key] ? ' checked' : ''}><span><b>${esc(it[0])}</b>${it[1] ? `<small>${esc(it[1])}</small>` : ''}</span></label>`;
@@ -23,7 +23,7 @@ function checklistHTML(kind, record) {
     <div class="check-grid">${sections}</div>
   </div>`;
 }
-function tabChecklist(a) { return checklistHTML('tester', a); }
+function tabChecklist(a) { return checklistHTML(autoFirst(a) ? 'autosomal' : 'tester', a); }
 
 /* ---------- Non-Tester Research (projects) ---------- */
 function fixProject(p) {
@@ -312,7 +312,7 @@ function renderLearn() {
     <div class="tbl-wrap"><table class="tbl"><tbody>${GLOSSARY.map(g => `<tr class="topic"><td><b>${esc(g[0])}</b></td><td style="white-space:normal">${esc(g[1])}${g[2] ? `<div class="formula" style="margin:4px 0 0">${esc(g[2])}</div>` : ''}</td></tr>`).join('')}</tbody></table></div></section>`;
   const checks = `<section class="learn-sec" id="learn-check"><h2>Pre-Research Checklists</h2>
     <p class="hint">Interactive versions are on the Pre-Research tab of each ancestor and each non-tester research case.</p>
-    ${['tester', 'nontester'].map(k => { const c = CHECKLISTS[k]; return `<details class="topic"><summary>${esc(c.title)}</summary>${c.sections.map(s => `<h3 style="margin-top:12px">${esc(s[0])}</h3><ul>${s[1].map(it => `<li><b>${esc(it[0])}</b>${it[1] ? ' — ' + esc(it[1]) : ''}</li>`).join('')}</ul>`).join('')}<p class="hint">${esc(c.purpose)}</p></details>`; }).join('')}</section>`;
+    ${['tester', 'autosomal', 'nontester'].map(k => { const c = CHECKLISTS[k]; return `<details class="topic"><summary>${esc(c.title)}</summary>${c.sections.map(s => `<h3 style="margin-top:12px">${esc(s[0])}</h3><ul>${s[1].map(it => `<li><b>${esc(it[0])}</b>${it[1] ? ' — ' + esc(it[1]) : ''}</li>`).join('')}</ul>`).join('')}<p class="hint">${esc(c.purpose)}</p></details>`; }).join('')}</section>`;
   return `<h1>Learn</h1>
   <p class="muted">The theory and methods of <i>Y-DNA Lineage Reconstruction: Theory and Application</i>.</p>
   <input id="learn-q" class="learn-search" type="search" placeholder="Search topics and terms">

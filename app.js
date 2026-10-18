@@ -33,7 +33,7 @@ function normalizeData(d) {
   return d;
 }
 function fixAncestor(a) {
-  ['documents', 'testers', 'gdPairs', 'conflicts', 'extraEvidence', 'socGens'].forEach(k => {
+  ['documents', 'testers', 'gdPairs', 'conflicts', 'extraEvidence', 'socGens', 'atMatches'].forEach(k => {
     if (!Array.isArray(a[k])) a[k] = [];
   });
   if (!a.conv || typeof a.conv !== 'object') a.conv = {};
@@ -41,6 +41,8 @@ function fixAncestor(a) {
   if (!a.pairMemory || typeof a.pairMemory !== 'object') a.pairMemory = {};
   /* The "his own SNP" question has been removed: the test type (Big Y-700 or markers) now decides whether SNPs are used. */
   delete a.ownSNP; delete a.snpHelpBig;
+  /* Cases made before the test was asked first count as chosen; a new ancestor picks its test before anything else. */
+  if (a.testChosen === undefined) a.testChosen = true;
   if (!a.id) a.id = uid();
   return a;
 }
@@ -279,7 +281,7 @@ function openConflicts(a) { return a.conflicts.filter(c => c.status !== 'Resolve
 /* SNP evidence is used only for Big Y-700 testers (the SNP-first method). */
 function snpUsed(a) { return a.method === 'SNP'; }
 function verdict(a) {
-  const st = [snpUsed(a) ? snpStatus(a) : null, strStatus(a), genealogyStatus(a)].filter(Boolean);
+  const st = [snpUsed(a) ? snpStatus(a) : null, autoFirst(a) ? autoStatus(a) : strStatus(a), genealogyStatus(a)].filter(Boolean);
   const open = openConflicts(a);
   if (st.some(s => s.c === 'red')) return { c: 'red', title: 'Conflict in the evidence', msg: 'Record and resolve the conflict before drawing a conclusion.' };
   if (st.every(s => s.c === 'green') && !open) return { c: 'green', title: 'Convergence achieved', msg: `All ${st.length === 3 ? 'three' : 'two'} lines of evidence align. The conclusion should remain open to revision as new evidence emerges.` };
@@ -287,7 +289,17 @@ function verdict(a) {
   return { c: 'amber', title: 'Research in progress', msg: 'Not every line of evidence has been tested yet.' };
 }
 function nextStep(a) {
-  /* Steps follow the chosen research method: STR-first or SNP-first. */
+  /* Steps follow the chosen research method: STR-first, SNP-first or autosomal-first. */
+  if (autoFirst(a)) {
+    const sa = autoStatus(a), sg = genealogyStatus(a);
+    if (!a.atMatches.length) return { tab: 'matches', text: 'Add your autosomal DNA matches who descend from this ancestor.' };
+    if (sa.c === 'red' || sg.c === 'red') return { tab: 'convergence', text: 'Record the conflict and work out a resolution path.' };
+    if (sa.c === 'amber') return { tab: 'matches', text: sa.msg };
+    if (!a.documents.length) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
+    if (sg.c === 'amber') return { tab: 'documents', text: sg.msg };
+    if (openConflicts(a)) return { tab: 'convergence', text: 'Resolve the open conflicts.' };
+    return { tab: 'report', text: 'Review and print the research report.' };
+  }
   const needSNP = snpUsed(a) && !targetSNP(a) ? { tab: 'testers', text: 'Add the testers\' SNP paths so their SNP tree can be mapped.' } : null;
   const needSTR = a.testers.length > 1 && !a.gdPairs.length ? { tab: 'str', text: 'Compare testers with a Genetic Distance analysis.' } : null;
   if (!a.testers.length) return { tab: 'testers', text: 'Add the Y-DNA testers who descend from this ancestor.' };
@@ -397,17 +409,18 @@ function renderSidebar() {
 
 /* ---------- Render: main ---------- */
 const TABS = [
-  ['checklist', 'Pre-Research'], ['overview', 'Overview'], ['testers', 'Testers & DNA'], ['str', 'STR Analysis'], ['documents', 'Documents'],
+  ['checklist', 'Pre-Research'], ['overview', 'Overview'], ['testers', 'Testers & DNA'], ['matches', 'Matches'], ['auto', 'Autosomal Analysis'], ['str', 'STR Analysis'], ['documents', 'Documents'],
   ['snp', 'SNP Analysis'], ['convergence', 'Convergence'], ['society', 'Lineage Society'], ['report', 'Report']
 ];
 /* Research method: STR-first (default) or SNP-first. The two swap the places of STR Analysis and SNP Analysis. */
 const METHODS = [
   { v: '', l: 'STR-first — basic marker tests (Y-37, Y-67, Y-111)', best: 'For testers with the basic marker tests (Y-37, Y-67 or Y-111). Genetic Distance shows who is closely related and the records build the line. SNPs are not used.' },
-  { v: 'SNP', l: 'SNP-first — Big Y-700 testers only', best: 'Only for testers who have taken the Big Y-700. Their SNP paths map out the testers\' SNP tree and show where their lines meet, the records build the line, and the STR markers narrow the generations.' }
+  { v: 'SNP', l: 'SNP-first — Big Y-700 testers only', best: 'Only for testers who have taken the Big Y-700. Their SNP paths map out the testers\' SNP tree and show where their lines meet, the records build the line, and the STR markers narrow the generations.' },
+  { v: 'AUTO', l: 'Autosomal-first — AncestryDNA, Family Finder, 23andMe or MyHeritage', best: '' }
 ];
 function snpFirst(a) { return a.method === 'SNP'; }
 function methodOrder(a, list) { const i = list.indexOf('str'), j = list.indexOf('snp'); if (!snpFirst(a) || i < 0 || j < 0) return list; const r = list.slice(); r[i] = 'snp'; r[j] = 'str'; return r; }
-function tabsFor(a) { const t = TABS.filter(x => (x[0] !== 'snp' || snpUsed(a)) && (x[0] !== 'society' || wantsSociety(a))); return methodOrder(a, t.map(x => x[0])).map(k => t.find(x => x[0] === k)); }
+function tabsFor(a) { const t = TABS.filter(x => (x[0] !== 'snp' || snpUsed(a)) && (x[0] !== 'society' || wantsSociety(a)) && (autoFirst(a) ? !['testers', 'str', 'snp'].includes(x[0]) : !['matches', 'auto'].includes(x[0]))); return methodOrder(a, t.map(x => x[0])).map(k => t.find(x => x[0] === k)); }
 /* The Lineage Society step only appears when the research question is about proving the line to a society. */
 function wantsSociety(a) { const q = inquiryOf(a); return !!q && /society$/.test(q.v); }
 function render() {
@@ -444,6 +457,8 @@ const START_PATHS = {
     gather: ['Each tester\'s FamilyTreeDNA results, or the details he shares with you.', 'Each tester\'s SNP path: look up his terminal SNP in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open Ancestral Path.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.', 'Optional: the Genetic Distance between testers from the Y-DNA Matches page, to compare their STR markers too.'] },
   str: { title: 'Your path: STR-first', why: 'Y-37, Y-67 and Y-111 results show how closely testers match on their markers (the Genetic Distance), which estimates how many generations back they connect.',
     gather: ['Each tester\'s Y-DNA Matches list from FamilyTreeDNA: who matches, the Genetic Distance (GD) and how many markers were compared.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.', 'Optional: the marker values that differ between two testers, from the Y-STR results page, for a more exact estimate.'] },
+  auto: { title: 'Your path: Autosomal-first', why: 'An autosomal test (AncestryDNA, FamilyTreeDNA Family Finder, 23andMe or MyHeritage) shows how much DNA you share with each match, which tests the recent generations of your line, about the last five or six, on any side of the family.',
+    gather: ['Your DNA match list from your testing company.', 'For each match who descends from the ancestor: the shared cM and the longest segment the company shows.', 'How many generations you and each match are from the ancestor (a parent is generation 1), and which of the ancestor\'s children each match descends through.', 'Your family tree back to the ancestor, with the records that support it.'] },
   non: { title: 'Your path: Non-Tester Research', why: 'Without a Y-DNA test, you can still compare your documented line with the lineage groupings of a surname project and narrow down where it fits.',
     gather: ['Your documented line back to its earliest known ancestor, with the places the family lived.', 'The surname\'s Y-DNA project on FamilyTreeDNA and its Y-DNA Results page, which lists the project\'s groupings.', 'Optional: contact details for the project administrators, who can answer questions about the groupings.'] }
 };
@@ -454,12 +469,12 @@ function startHereHTML() {
     <h3>Start here</h3>
     <p class="hint">New to Y-DNA research? Answer two questions and the app will show you where to begin and what to gather first. Not sure yet? <a href="#" data-act="load-example">Look at a finished example</a> first.</p>
     <div class="grid2">
-      <div class="field"><label>1. Have you, or a male relative on the line you are researching, taken a Y-DNA test?</label>${sel('tested', [['Y', 'Yes'], ['N', 'No, not yet']])}</div>
-      ${t === 'Y' ? `<div class="field"><label>2. Which test?</label>${sel('test', [['snp', 'Big Y-700'], ['str', 'Y-37, Y-67 or Y-111']])}</div>` : ''}
+      <div class="field"><label>1. Have you, or a relative on the line you are researching, taken a DNA test?</label>${sel('tested', [['Y', 'Yes'], ['N', 'No, not yet']])}</div>
+      ${t === 'Y' ? `<div class="field"><label>2. Which test?</label>${sel('test', [['snp', 'Big Y-700'], ['str', 'Y-37, Y-67 or Y-111'], ['auto', 'An autosomal test (AncestryDNA, Family Finder, 23andMe or MyHeritage)']])}</div>` : ''}
     </div>
     ${P ? `<div class="verdict" style="margin-top:14px;display:block"><b>${P.title}</b><div class="hint" style="margin:4px 0 10px">${P.why}</div>
       <b>Gather these first:</b><ul style="margin:6px 0 12px 18px">${P.gather.map(x => `<li>${x}</li>`).join('')}</ul>
-      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example">Look at a finished example</button></div></div>` : ''}
+      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : key === 'auto' ? 'AUTO' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example">Look at a finished example</button></div></div>` : ''}
   </div>`;
 }
 /* A finished example case for a made-up family, so a beginner can see what good entries look like at every step. */
@@ -485,19 +500,19 @@ function loadExample() {
 }
 function renderHome() {
   const steps = [
-    ['Record documents', 'Birth, marriage, census, probate, land, military and church records.'],
-    ['Add testers', 'Each descendant\'s SNP path, birth year and generations.'],
-    ['Analyze SNPs', 'Shared SNP, lineage map, GPS, YPS and formation dates.'],
-    ['Analyze STRs', 'Genetic Distance between testers and expected ranges.'],
-    ['Align genealogy', 'Does each documented line match the DNA?'],
-    ['Test convergence', 'Do SNPs, STRs and genealogy agree?'],
-    ['Resolve conflicts', 'Reassess the evidence where it does not align.'],
-    ['Report', 'A printable summary of the case.']
+    ['Choose your test', 'STR markers, Big Y-700 SNPs or an autosomal test. It decides which DNA evidence the case uses.'],
+    ['Set your question', 'What you want to find out, such as whether the documented ancestor is the right man.'],
+    ['Gather the DNA evidence', 'The testers\' markers or SNPs, or your autosomal matches and the DNA you share.'],
+    ['Gather the paper evidence', 'Birth, marriage, census, probate, land, military and church records that build the line.'],
+    ['Test each on its own', 'Does the DNA fit the generations the records show? Do the records hold up?'],
+    ['Look for convergence', 'When the separate lines of evidence point to the same ancestor, they converge.'],
+    ['Resolve conflicts', 'Where they disagree, find the cause: a gap in the records, an unknown parent, or the wrong line.'],
+    ['Report', 'The answer to your question, how strongly the evidence agrees, and what is still open.']
   ];
   const cards = realAncestors().map(a => {
     const v = verdict(a);
     return `<div class="anc-card" data-act="open-ancestor" data-id="${a.id}">
-      <h3>${esc(a.name || 'Unnamed ancestor')}</h3>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><h3>${esc(a.name || 'Unnamed ancestor')}</h3><button class="btn small danger" data-act="del-card" data-id="${a.id}">Delete</button></div>
       <div class="hint">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}</div></div>`;
   }).join('');
   return `
@@ -506,24 +521,40 @@ function renderHome() {
     <p>Reconstruct patrilineal lineages by testing whether SNP data, STR markers and traditional genealogy converge. Each ancestor is a research case with its own workspace.</p>
   </div>
   ${startHereHTML()}
-  <div class="card"><h3>The research workflow</h3><div class="steps">${steps.map(s => `<div class="step"><b>${s[0]}</b>${s[1]}</div>`).join('')}</div></div>
+  <div class="card"><h3>What is convergence?</h3><p class="hint" style="margin:0 0 14px">No single source proves a line. DNA can show two people are related but not who their shared ancestor was; records can name the ancestor but may be wrong or missing. <b>Convergence</b> is when separate, independent lines of evidence, the DNA and the records, all point to the same ancestor. The more lines that agree, the stronger the conclusion. Each case in the app follows these steps:</p><div class="steps">${steps.map(s => `<div class="step"><b>${s[0]}</b>${s[1]}</div>`).join('')}</div></div>
   <h2>Your ancestors</h2>
   ${realAncestors().length ? `<div class="anc-cards">${cards}</div>` : '<p class="muted">No ancestors yet. Use Start here above, or the + beside Ancestors in the menu.</p>'}`;
 }
 
+/* The first screen of a new ancestor: which DNA test, so the checklist and every step after it fit that test. */
+function chooseTestHTML(a) {
+  const opts = [
+    ['', 'STR-first', 'Y-37, Y-67 or Y-111 from FamilyTreeDNA', 'You start with the testers\' marker matches and their Genetic Distance.'],
+    ['SNP', 'SNP-first', 'Big Y-700 from FamilyTreeDNA', 'You start by mapping the testers\' SNP tree and where their lines meet.'],
+    ['AUTO', 'Autosomal-first', 'AncestryDNA, FamilyTreeDNA Family Finder, 23andMe or MyHeritage', 'You start with your DNA matches and how much DNA you share.']
+  ];
+  return `<div class="anc-header"><div><h1>${esc(a.name || 'New ancestor')}</h1></div></div>
+  <div class="wiz-head"><div class="wiz-step">Before you begin</div><h2 class="wiz-q">Which DNA test do you have?</h2><div class="wiz-help"><b>What to do:</b> Choose the test you, or the testers on this line, have taken. It sets the checklist and the steps that follow. You can change it later on the Overview step, under Goal → More options.</div></div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">${opts.map(o => `<div class="card" style="margin:0;display:flex;flex-direction:column;gap:10px">
+    <h3 style="margin:0">${o[1]}</h3><div><b>${esc(o[2])}</b></div><p class="hint" style="margin:0;flex:1">${o[3]}</p>
+    <div><button class="btn" data-act="choose-test" data-m="${o[0]}">Choose ${o[1]}</button></div></div>`).join('')}</div>
+  <p class="hint" style="margin-top:18px">No DNA test yet? Use <b>Non-Tester Research</b> in the menu to compare your line with a surname project.</p>`;
+}
 function renderAncestor(a) {
-  const st = (snpFirst(a) ? [['SNP', snpStatus(a)], ['Genealogy', genealogyStatus(a)], ['STR', strStatus(a)]] : [['STR', strStatus(a)], ['Genealogy', genealogyStatus(a)], ['SNP', snpStatus(a)]]).filter(s => s[0] !== 'SNP' || snpUsed(a));
+  if (!a.testChosen) return chooseTestHTML(a);
+  const st = autoFirst(a) ? [['Autosomal', autoStatus(a)], ['Genealogy', genealogyStatus(a)]] : (snpFirst(a) ? [['SNP', snpStatus(a)], ['Genealogy', genealogyStatus(a)], ['STR', strStatus(a)]] : [['STR', strStatus(a)], ['Genealogy', genealogyStatus(a)], ['SNP', snpStatus(a)]]).filter(s => s[0] !== 'SNP' || snpUsed(a));
   if (view.tab === 'snp' && !snpUsed(a)) view.tab = 'overview';
   if (view.tab === 'society' && !wantsSociety(a)) view.tab = 'overview';
+  if (!tabsFor(a).some(t => t[0] === view.tab)) view.tab = 'overview';
   const list = tabsFor(a), idx = Math.max(0, list.findIndex(t => t[0] === view.tab));
   const tabs = list.map((t, i) => `<button class="tab${view.tab === t[0] ? ' active' : ''}${i < idx ? ' done' : ''}" data-act="tab" data-tab="${t[0]}"><span class="num">${i < idx ? '✓' : i + 1}</span>${t[1]}</button>`).join('');
   /* Every step explains what to do, then Back / Continue move through the steps in order. */
   const g = guideFor(a, view.tab), prev = list[idx - 1], next = list[idx + 1];
   const guide = g ? `<div class="wiz-head"><div class="wiz-step">Step ${idx + 1} of ${list.length}</div><h2 class="wiz-q">${g.q}</h2><div class="wiz-help"><b>What to do:</b> ${g.help}</div></div>` : '';
-  const nav = view.tab === 'overview' ? '' : `<div class="wiz-nav no-print">${prev ? `<button class="btn ghost" data-act="tab" data-tab="${prev[0]}">← Back</button>` : '<span></span>'}${next ? `<button class="btn" data-act="tab" data-tab="${next[0]}">Continue to ${esc(next[1])} →</button>` : ''}</div>`;
+  const nav = view.tab === 'overview' ? '' : `<div class="wiz-nav no-print">${prev ? `<button class="btn ghost" data-act="tab" data-tab="${prev[0]}">← Back</button>` : '<button class="btn ghost" data-act="back-test">← Back</button>'}${next ? `<button class="btn" data-act="tab" data-tab="${next[0]}">Continue to ${esc(next[1])} →</button>` : ''}</div>`;
   const body = {
     checklist: tabChecklist, overview: tabOverview, documents: tabDocuments, testers: tabTesters, snp: tabSNP,
-    str: tabSTR, alignment: tabAlignment, convergence: tabConvergence, society: tabSociety, report: tabReport
+    str: tabSTR, alignment: tabAlignment, convergence: tabConvergence, society: tabSociety, report: tabReport, matches: tabMatches, auto: tabAuto
   }[view.tab] || tabOverview;
   return `
   <div class="anc-header">
@@ -587,12 +618,14 @@ function guideFor(a, tab) {
     alignment: { q: 'Does each tester\'s family tree match the DNA?', help: 'For each tester, compare his documented line with what the DNA shows. Enter his earliest documented ancestor and where the family lived. Choose <b>Yes</b> if the paper trail and the DNA agree, <b>No</b> if they do not, and note any gaps or conflicts, such as a missing generation or a possible non-paternal event (NPE).' },
     snp: { q: 'Map the testers\' SNP tree', help: 'Every Big Y-700 tester has an SNP path: his newest SNP first, then older SNPs he shares with other men. The tree below draws all the testers\' paths together, oldest SNP at the top, so you can see where their lines branch apart and where they meet. Type or choose the ancestor in whom each SNP formed, if you know him. Then enter the FTDNA date of the SNP where the lines meet, and the app checks it against the generations.' },
     convergence: { q: 'Does the evidence agree?', help: 'Here the STR, genealogy and SNP evidence are weighed together. The chart shows how much of it supports the lineage and how much contradicts it. Review each line of evidence, change it if you know better, and record any conflict with its likely cause and how you plan to resolve it.' },
+    matches: { q: 'Who are your autosomal DNA matches?', help: 'Open your testing company\'s DNA match list (AncestryDNA, FamilyTreeDNA Family Finder, 23andMe or MyHeritage) and add each match who descends from this ancestor. Enter the shared cM and the longest segment the company shows, and how many generations you and the match are each from the ancestor (a parent is generation 1). Note which child of the ancestor the match descends through. The app works out the relationship your trees show.' },
+    auto: { q: 'Does the shared DNA fit the relationships?', help: 'For each match, the app compares the shared cM with the usual range for the relationship your trees show, and estimates how far back the match connects. A consistent match supports the line; a match outside the usual range means the tree needs a second look. Small amounts of shared DNA (under 7 cM) and very distant cousins (beyond 6th cousins) can be shared by chance, so they are not relied on.' },
     society: { q: 'Proving the line to a lineage society', help: 'If you are applying to a lineage society (such as the DAR, SAR or the Mayflower Society), set out the proof one generation at a time, from the applicant up to the qualifying ancestor. For each generation give the birth, marriage and death with their sources, and the record that proves he or she was the child of the next generation. Where the records cannot prove a link, the DNA evidence from this case can support it. Each society sets its own rules for DNA, so check its current policy.' },
     report: { q: 'Your research report', help: 'This is the summary of the case, in the order you worked. Download it as a Word document or print it. Conclusions stay provisional: new records or test results can change them.' }
   };
   /* SNP-first: the step's advice also says what to look for, for the question the user chose. */
   const inq = inquiryOf(a);
-  const qTab = wantsSociety(a) ? 'society' : snpFirst(a) ? 'snp' : 'str';
+  const qTab = wantsSociety(a) ? 'society' : snpFirst(a) ? 'snp' : autoFirst(a) ? 'auto' : 'str';
   if (tab === qTab && inq && G[qTab]) return { q: G[qTab].q, help: `${G[qTab].help}<br><b>For your question (${esc(inq.q)}):</b> ${inq.focus}` };
   return G[tab] || null;
 }
@@ -671,7 +704,7 @@ STR_INQUIRIES.push({ v: 's-society', q: 'Can I prove this line to a lineage soci
   needs: 'The documented line from the applicant up to the qualifying ancestor, with sources for each generation, and the society\'s rules.',
   focus: 'On the Lineage Society step, prove each generation in turn. Where a link has no paper proof, the GD evidence from this case can support it, if the society accepts DNA.',
   answer: 'e.g. "Ready to submit: all 9 generations are proven."' });
-function inquiryList(a) { return snpFirst(a) ? INQUIRIES : STR_INQUIRIES; }
+function inquiryList(a) { return snpFirst(a) ? INQUIRIES : autoFirst(a) ? AUTO_INQUIRIES : STR_INQUIRIES; }
 function inquiryOf(a) { return inquiryList(a).find(x => x.v === a.inquiry) || null; }
 /* STR-first: whether the GD comparisons entered so far answer the chosen question. */
 function strInquiryStatus(a, inq, need, done, lead, no) {
@@ -723,6 +756,7 @@ function inquiryStatus(a) {
   const need = m => ({ c: 'amber', label: 'Not answered yet', msg: m }), done = m => ({ c: 'green', label: 'Answered', msg: m });
   const lead = m => ({ c: 'amber', label: 'Lead found', msg: m }), no = m => ({ c: 'red', label: 'Answered: no', msg: m });
   if (/society$/.test(inq.v)) { const r = societyReadiness(a); return r.c === 'green' ? done(r.msg) : r.c === 'amber' ? lead(r.msg) : need(r.msg); }
+  if (autoFirst(a)) return autoInquiryStatus(a, inq, need, done, lead, no);
   if (!snpFirst(a)) return strInquiryStatus(a, inq, need, done, lead, no);
   const paths = a.testers.filter(t => pathOf(t).length), tgt = targetSNP(a), yr = num(a.ftdnaDate);
   const rows = a.testers.map(t => genRow(a, t)).filter(r => r.diff != null && r.gens != null);
@@ -777,17 +811,18 @@ function ancPrompt(a) {
     society: { q: 'Who is the qualifying ancestor?', help: 'Enter the ancestor the society application is based on (for example, the patriot or passenger), as his name appears in the records, with his birth and death years and where he lived.' }
   };
   const inq = inquiryOf(a);
-  return (inq && P[inq.v.replace(/^s-/, '')]) || { q: 'Who is the ancestor?', help: 'Enter the man you believe the testers descend from. Use his name as it appears in the records, his birth and death years (estimates are fine) and where he lived. His birth year is used to work out each tester\'s years per generation.' };
+  if (!(inq && P[inq.v.replace(/^[sa]-/, '')]) && autoFirst(a)) return { q: 'Who is the ancestor?', help: 'Enter the ancestor you and your matches believe you descend from, a man or a woman, as the name appears in the records, with birth and death years (estimates are fine) and where they lived.' };
+  return (inq && P[inq.v.replace(/^[sa]-/, '')]) || { q: 'Who is the ancestor?', help: 'Enter the man you believe the testers descend from. Use his name as it appears in the records, his birth and death years (estimates are fine) and where he lived. His birth year is used to work out each tester\'s years per generation.' };
 }
 
 /* ----- Tab 1: Overview ----- */
 function tabOverview(a) {
-  const st = (snpFirst(a) ? [['SNP evidence', snpStatus(a)], ['Genealogical evidence', genealogyStatus(a)], ['STR evidence', strStatus(a)]] : [['STR evidence', strStatus(a)], ['Genealogical evidence', genealogyStatus(a)], ['SNP evidence', snpStatus(a)]]).filter(s => s[0] !== 'SNP evidence' || snpUsed(a));
+  const st = autoFirst(a) ? [['Autosomal evidence', autoStatus(a)], ['Genealogical evidence', genealogyStatus(a)]] : (snpFirst(a) ? [['SNP evidence', snpStatus(a)], ['Genealogical evidence', genealogyStatus(a)], ['STR evidence', strStatus(a)]] : [['STR evidence', strStatus(a)], ['Genealogical evidence', genealogyStatus(a)], ['SNP evidence', snpStatus(a)]]).filter(s => s[0] !== 'SNP evidence' || snpUsed(a));
   const v = verdict(a), ns = nextStep(a), shared = sharedSNP(a.testers);
   return `
   ${(() => {
     /* Guided, one step per screen: each step explains what to do, then Back / Continue. */
-    const k = Math.max(0, Math.min(2, view.ostep || 0));
+    let k = Math.max(0, Math.min(2, view.ostep || 0));
     const steps = [
       { tab: 'Ancestor', q: ancPrompt(a).q,
         help: ancPrompt(a).help,
@@ -795,22 +830,26 @@ function tabOverview(a) {
         ${field('Birth year', 'birth', a.birth, { type: 'number', ph: 'e.g. 1609' })}
         ${field('Death year', 'death', a.death, { type: 'number', ph: 'e.g. 1665' })}
         ${field('Place', 'place', a.place, { ph: 'e.g. Lunenburg County, Virginia' })}` },
-      { tab: 'Tests', q: 'What tests do the testers have?',
-        help: `Check which tests the testers have taken on FamilyTreeDNA. If they have <b>Big Y-700</b> results, choose <b>SNP-first</b>: you will start by mapping their SNP tree. If they have the basic marker tests (<b>Y-37, Y-67 or Y-111</b>), choose <b>STR-first</b>: you will start with their marker matches. This sets the order of the steps that follow.`,
-        body: `<div class="field" style="grid-column:span 2"><label>Tests</label><select data-anc="method">${METHODS.map(o => `<option value="${o.v}"${(snpFirst(a) ? 'SNP' : '') === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select></div>
-        <div class="field full"><div class="hint">${METHODS.find(o => o.v === (snpFirst(a) ? 'SNP' : '')).best}<br><b>Your steps:</b> ${tabsFor(a).slice(2).map(t => t[1]).join(' → ')}</div></div>` },
+      { tab: 'Tests', q: 'What DNA tests have been taken?',
+        help: `Check which tests have been taken. If the testers have <b>Big Y-700</b> results, choose <b>SNP-first</b>: you will start by mapping their SNP tree. If they have the basic Y-DNA marker tests (<b>Y-37, Y-67 or Y-111</b>), choose <b>STR-first</b>: you will start with their marker matches. If you have an <b>autosomal test</b> (AncestryDNA, FamilyTreeDNA Family Finder, 23andMe or MyHeritage), choose <b>Autosomal-first</b>: you will start with your DNA matches. This sets the order of the steps that follow.`,
+        body: `<div class="field" style="grid-column:span 2"><label>Tests</label><select data-anc="method">${METHODS.map(o => `<option value="${o.v}"${(a.method || '') === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select></div>
+        <div class="field full"><div class="hint">${(METHODS.find(o => o.v === (a.method || '')) || METHODS[0]).best ? (METHODS.find(o => o.v === (a.method || '')) || METHODS[0]).best + '<br>' : ''}<b>Your steps:</b> ${tabsFor(a).slice(2).map(t => t[1]).join(' → ')}</div></div>` },
       { tab: 'Goal', q: 'What do you want to find out?',
-        help: `Choose the question you want the ${snpFirst(a) ? 'SNP' : 'STR marker'} evidence to answer. It decides what to look for and appears at the top of the report, with whether it has been answered. You can add your own notes below.`,
+        help: `Choose the question you want the ${snpFirst(a) ? 'SNP' : autoFirst(a) ? 'autosomal DNA' : 'STR marker'} evidence to answer. It decides what to look for and appears at the top of the report, with whether it has been answered. You can add your own notes below.`,
         body: `<div class="field" style="grid-column:span 2"><label>Your question</label><select data-anc="inquiry"><option value="">— choose a question —</option>${inquiryList(a).map(o => `<option value="${o.v}"${a.inquiry === o.v ? ' selected' : ''}>${esc(o.q)}</option>`).join('')}</select></div>
         ${inquiryOf(a) ? `<div class="field full"><div class="hint"><b>You need:</b> ${inquiryOf(a).needs}<br><b>What to look for:</b> ${inquiryOf(a).focus}<br><b>The answer looks like:</b> ${esc(inquiryOf(a).answer)}</div></div>` : ''}
         ${field('Your notes (optional)', 'notes', a.notes, { type: 'textarea', full: true, ph: 'e.g. John and Samuel Hartwell both believe they descend from William Hartwell' })}
         <details class="gd-doc" style="grid-column:1 / -1"><summary>More options</summary><div class="grid3" style="margin-top:8px">
+          <div class="field"><label>Change test</label><select data-anc="method">${METHODS.map(o => `<option value="${o.v}"${(a.method || '') === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select></div>
           ${field('Fallback Years Per Generation (YPG)', 'ypg', a.ypg, { type: 'number', ph: `Default ${S.settings.ypg}`, hint: 'Only used for a tester whose own YPG can\'t be calculated.' })}
           <div class="field"><label>&nbsp;</label><button class="btn small danger" data-act="del-ancestor">Delete this ancestor</button></div>
         </div></details>` }
     ];
     /* Tests first, then the question, then the ancestor the question is about. */
     steps.push(steps.shift());
+    /* The test is chosen before the checklist, so the Tests question is not asked again here. */
+    steps.shift();
+    k = Math.min(k, steps.length - 1);
     const s = steps[k], list = tabsFor(a), prev = list[0], next = list[2];
     return `<div class="card wiz">
       <div class="wiz-prog">${steps.map((x, i) => `<button class="wiz-dot${i === k ? ' on' : i < k ? ' done' : ''}" data-act="ostep" data-n="${i}"><span class="od-num">${i < k ? '✓' : i + 1}</span>${x.tab}</button>`).join('')}</div>
@@ -847,6 +886,7 @@ function testTypes(a) { return snpFirst(a) ? ['Big Y-700'] : ['Y-111', 'Y-67', '
 function tabTesters(a) {
   return `<div class="card">
     <div class="card-head"><h3>Testers descending from ${esc(a.name || 'this ancestor')}</h3></div>
+    <p class="hint"><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
     ${snpFirst(a) ? '<p class="hint"><b>SNP path</b>: enter the tester\'s terminal SNP, his newest one, in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open <b>Ancestral Path</b>. Copy the SNPs from his terminal SNP back toward this ancestor, separated by commas.</p>' : ''}
     ${editTable('testers', [
       { k: 'label', label: 'Tester', ph: 'e.g. John Hartwell' },
@@ -1138,7 +1178,7 @@ function autoEvidence(a) {
     { key: 'gen', type: 'Genealogical records', result: a.documents.length ? `${a.documents.filter(d => d.supports === 'Y').length} of ${a.documents.length} document(s) support the lineage${a.documents.some(d => d.supports === 'N') ? `, ${a.documents.filter(d => d.supports === 'N').length} contradict it` : ''}` : '—', ok: a.documents.some(d => d.supports === 'N') ? false : a.documents.some(d => d.supports === 'Y') ? true : null }
   ];
   /* Listed in the order of the research method. */
-  return snpFirst(a) ? snpRows.concat(rest.slice(1), rest[0]) : rest.concat(snpRows);
+  return autoFirst(a) ? [autoEvidenceRow(a), rest[1]] : snpFirst(a) ? snpRows.concat(rest.slice(1), rest[0]) : rest.concat(snpRows);
 }
 /* Convergence chart: every line of evidence counted as supporting, contrary or not yet tested.
    Uses the "Consistent?" choice where one is set, otherwise the automatic result. */
@@ -1210,6 +1250,146 @@ function tabConvergence(a) {
 /* ----- Tab 8: Report ----- */
 function simpleTable(head, rows) {
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="empty" colspan="${head.length}">None recorded.</td></tr>`}</tbody></table></div>`;
+}
+/* ----- Autosomal-first: matches, shared cM and the generations they point to ----- */
+function autoFirst(a) { return a.method === 'AUTO'; }
+const AUTO_COMPANIES = ['AncestryDNA', 'FamilyTreeDNA Family Finder', '23andMe', 'MyHeritage', 'Other'];
+/* Average shared cM and its usual range, by the total generations between two relatives (each one's generations back to the
+   shared ancestor, added together). Approximate figures after the Shared cM Project; beyond 6th cousins sharing is unreliable. */
+const AT_CM = { 2: [2613, 1613, 3488], 3: [1741, 1201, 2282], 4: [866, 396, 1397], 5: [433, 102, 980], 6: [229, 41, 592], 7: [122, 14, 353], 8: [73, 0, 234], 9: [48, 0, 192], 10: [35, 0, 139], 11: [28, 0, 127], 12: [25, 0, 117], 13: [21, 0, 111], 14: [21, 0, 86] };
+const AUTO_REL = { 2: 'siblings', 3: 'uncle or aunt', 4: '1st cousin', 5: '1st cousin once removed', 6: '2nd cousin', 7: '2nd cousin once removed', 8: '3rd cousin', 9: '3rd cousin once removed', 10: '4th cousin', 11: '4th cousin once removed', 12: '5th cousin', 13: '5th cousin once removed', 14: '6th cousin' };
+/* The relationship two people's trees show, from their generations back to the shared ancestor (a parent is generation 1). */
+function cousinName(g1, g2) {
+  const lo = Math.min(g1, g2), hi = Math.max(g1, g2), d = hi - lo;
+  if (lo === 1 && hi === 1) return 'Siblings';
+  if (lo === 1) return `${'Great-'.repeat(Math.max(0, d - 1))}${d > 1 ? 'uncle or aunt' : 'Uncle or aunt'}`;
+  const n = lo - 1, ord = n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'));
+  return `${ord} cousin${d === 1 ? ' once removed' : d === 2 ? ' twice removed' : d > 2 ? ` ${d} times removed` : ''}`;
+}
+function autoEval(m) {
+  const g1 = num(m.testerGens), g2 = num(m.matchGens), cm = num(m.cm), seg = num(m.longest), keys = Object.keys(AT_CM).map(Number);
+  const M = g1 >= 1 && g2 >= 1 ? g1 + g2 : null, doc = M != null ? { name: cousinName(g1, g2), M, r: AT_CM[M] } : null;
+  const fits = cm != null ? keys.filter(k => cm >= AT_CM[k][1] && cm <= AT_CM[k][2]) : [];
+  let best = null;
+  if (cm > 0) keys.forEach(k => { const d = Math.abs(Math.log(cm) - Math.log(AT_CM[k][0])); if (!best || d < best.d) best = { k, d }; });
+  let check = null;
+  if (cm != null && doc) {
+    if (cm < 7 || (seg != null && seg < 7)) check = { c: 'amber', label: 'Too small to rely on', ok: null };
+    else if (!doc.r) check = { c: 'amber', label: 'Too distant to rely on', ok: null };
+    else if (cm >= doc.r[1] && cm <= doc.r[2]) check = { c: 'green', label: 'Consistent', ok: true };
+    else check = { c: 'red', label: 'Outside the usual range', ok: false };
+  }
+  return { m, g1, g2, cm, seg, M, doc, fits, best: best ? best.k : null, check };
+}
+function autoStatus(a) {
+  if (ovr(a, 'auto') === 'N') return { c: 'red', msg: 'Autosomal evidence marked inconsistent.' };
+  if (ovr(a, 'auto') === 'Y') return { c: 'green', msg: 'Autosomal evidence marked consistent.' };
+  const ev = a.atMatches.map(autoEval);
+  if (!ev.length) return { c: 'grey', msg: 'No autosomal matches yet.' };
+  if (ev.some(e => e.check && e.check.ok === false)) return { c: 'red', msg: 'A match shares an amount of DNA outside the usual range for the relationship the trees show.' };
+  if (ev.some(e => !e.check)) return { c: 'amber', msg: 'Enter the shared cM and both generations for every match.' };
+  if (!ev.some(e => e.check.ok)) return { c: 'amber', msg: 'The matches are too distant, or share too little DNA, to rely on.' };
+  return { c: 'green', msg: 'The autosomal matches are consistent with the relationships the trees show.' };
+}
+function autoEvidenceRow(a) {
+  const ev = a.atMatches.map(autoEval), ok = ev.filter(e => e.check && e.check.ok).length, bad = ev.filter(e => e.check && e.check.ok === false).length;
+  return { key: 'auto', type: 'Autosomal DNA matches', result: ev.length ? `${ok} of ${ev.length} match(es) consistent with the documented relationship` : '—', ok: bad ? false : ok ? true : null };
+}
+/* Generation chart for one match: generations back from the match, with the documented ancestor and the estimate from the shared cM. */
+function autoChart(e) {
+  if (e.best == null || e.g1 == null || !e.fits.length) return '';
+  const est = e.best - e.g1, lo = Math.max(1, Math.min(...e.fits) - e.g1), hi = Math.max(...e.fits) - e.g1;
+  if (est < 1 || hi < 1) return '';
+  const A = e.g2 || 0, G = Math.min(30, Math.max(A, est));
+  const gens = Array.from({ length: G }, (_, j) => j + 1 === est && j + 1 === A ? rcCell('est', j + 1).replace('border:1px solid #a8762f', 'border:3px solid #15303c') : rcCell(j + 1 === A ? 'anc' : j + 1 === est ? 'est' : 'gen', j + 1)).join('');
+  return rcLabel(`${esc(e.m.match || 'Match')} · ${e.cm} cM shared with ${esc(e.m.tester || 'the tester')} · estimate ${est} generation${est === 1 ? '' : 's'} back${hi > lo ? ` (likely ${lo}–${hi})` : ''}`) + rcTable(`<tr>${gens}</tr>`);
+}
+function autoKey() { return reportKey([['anc', 'Ancestor (from the tree)'], ['est', 'Estimate from shared cM']]).replace("Generation 1 is the tester's father.", "Generation 1 is the match's parent."); }
+function tabMatches(a) {
+  return `<div class="card">
+    <h3>Autosomal DNA matches</h3>
+    <p class="hint">Add each match who descends from this ancestor. Generations count back from each person to the ancestor: a parent is generation 1, a grandparent generation 2. If you are adding your own matches, the Tester columns are you; they fill in automatically after the first row.</p>
+    ${editTable('atMatches', [
+      { k: 'tester', label: 'Tester', w: 140, ph: 'e.g. John Hartwell' },
+      { k: 'testerGens', label: 'Tester\'s generations', type: 'number', w: 90, ph: 'e.g. 4' },
+      { k: 'match', label: 'Match', w: 140, ph: 'e.g. Mary Ellison' },
+      { k: 'matchGens', label: 'Match\'s generations', type: 'number', w: 90, ph: 'e.g. 4' },
+      { k: 'company', label: 'Company', type: 'select', opts: AUTO_COMPANIES, w: 150 },
+      { k: 'cm', label: 'Shared cM', type: 'number', w: 90, ph: 'e.g. 75' },
+      { k: 'longest', label: 'Longest segment (cM)', type: 'number', w: 90, ph: 'e.g. 22' },
+      { k: 'through', label: 'Through which child?', w: 150, ph: 'e.g. his son Thomas' },
+      { k: 'rel', label: 'Relationship (from the trees)', type: 'calc', render: m => { const e = autoEval(m); return e.doc ? esc(e.doc.name) : '—'; } }
+    ], a.atMatches, { addLabel: 'Add match', empty: 'No matches yet.' })}
+  </div>`;
+}
+function tabAuto(a) {
+  const ev = a.atMatches.map(autoEval);
+  const fitText = e => e.best == null ? '—' : `Most likely ${AUTO_REL[e.best]}`;
+  const charts = ev.map(autoChart).join('');
+  return `${wantsSociety(a) ? '' : inquiryCard(a)}<div class="card">
+    <h3>Shared DNA and relationships</h3>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Match</th><th>Shared cM</th><th>Relationship (from the trees)</th><th>Usual range for it</th><th>What the cM fits</th><th>Check</th></tr></thead><tbody>
+    ${ev.length ? ev.map(e => `<tr><td>${esc(e.m.match || '—')}${e.m.through ? `<br><span class="muted">through ${esc(e.m.through)}</span>` : ''}</td><td class="calc">${e.cm == null ? '—' : e.cm}</td><td>${e.doc ? esc(e.doc.name) : '—'}</td><td class="calc">${e.doc && e.doc.r ? `${e.doc.r[1]}–${e.doc.r[2]} cM` : '—'}</td><td>${fitText(e)}</td><td>${e.check ? pill(e.check.c, e.check.label) : '<span class="muted">Add the cM and generations</span>'}</td></tr>`).join('') : '<tr><td class="empty" colspan="6">Add matches on the Matches step.</td></tr>'}
+    </tbody></table></div>
+    <p class="hint" style="margin-top:8px">Ranges are approximate, after the Shared cM Project. Matches sharing under 7 cM, and relatives beyond 6th cousins, can share DNA by chance, so they are not relied on.</p>
+  </div>
+  ${charts ? `<div class="card"><h3>Generation charts</h3>${charts}${autoKey()}</div>` : ''}`;
+}
+function autoReportHTML(a) {
+  const ev = a.atMatches.map(autoEval), charts = ev.map(autoChart).join('');
+  return `<h2>Autosomal DNA</h2>
+    ${simpleTable(['Match', 'Shared cM', 'Longest segment', 'Relationship (from the trees)', 'Most likely from cM', 'Check'], ev.map(e => [`${esc(e.m.match)}${e.m.through ? '<br><span class="muted">through ' + esc(e.m.through) + '</span>' : ''}`, e.cm == null ? '—' : e.cm, e.seg == null ? '—' : e.seg, e.doc ? esc(e.doc.name) : '—', e.best != null ? AUTO_REL[e.best] : '—', e.check ? esc(e.check.label) : '—']))}
+    ${charts ? `<h2>Generation Chart</h2>${charts}${autoKey()}` : ''}`;
+}
+/* Autosomal-first questions, answered from the matches. */
+const AUTO_INQUIRIES = [
+  { v: 'a-desc', q: 'Do these matches descend from this ancestor?',
+    needs: 'DNA matches who believe they descend from the ancestor, with their trees.',
+    focus: 'Check that each match shares the amount of DNA expected for the relationship your trees show. Consistent matches support descent from the ancestor.',
+    answer: 'e.g. "Yes: 4 of 4 matches share the DNA expected for their relationships."' },
+  { v: 'a-child', q: 'Which child\'s line does a match come through?',
+    needs: 'Matches whose trees name the child of the ancestor they descend from.',
+    focus: 'Enter the child each match descends through, then check the shared DNA fits. Several consistent matches through the same child support that line.',
+    answer: 'e.g. "Through his son Thomas: Mary Ellison and Ann Price."' },
+  { v: 'a-rel', q: 'Is the documented relationship right?',
+    needs: 'A match whose relationship to you is worked out in your trees.',
+    focus: 'Compare the shared cM with the usual range for that relationship. Outside the range, recheck the generations in the tree.',
+    answer: 'e.g. "Yes: 75 cM fits 3rd cousins."' },
+  { v: 'a-who', q: 'How closely related is a match?',
+    needs: 'A match and the amount of DNA you share.',
+    focus: 'Read what the shared cM fits on the Autosomal Analysis step, and how many generations back it points from the match.',
+    answer: 'e.g. "Most likely a 2nd cousin, about 3 generations back from the match."' }
+];
+function autoInquiryStatus(a, inq, need, done, lead, no) {
+  const ev = a.atMatches.map(autoEval), ok = ev.filter(e => e.check && e.check.ok), bad = ev.filter(e => e.check && e.check.ok === false);
+  const nm = e => esc(e.m.match || 'A match');
+  if (!ev.length) return need('Add your matches on the Matches step.');
+  const checked = ev.some(e => e.check);
+  switch (inq.v) {
+    case 'a-desc':
+      if (!checked) return need('Enter the shared cM and both generations for each match.');
+      return bad.length ? no(`${bad.map(nm).join(', ')} share${bad.length === 1 ? 's' : ''} an amount of DNA outside the usual range for the relationship the trees show.`)
+        : ok.length ? done(`Yes: ${ok.length} of ${ev.length} match${ev.length === 1 ? '' : 'es'} share the DNA expected for their relationship (${ok.map(nm).join(', ')}).`)
+        : lead('The matches are too distant, or share too little DNA, to rely on.');
+    case 'a-child': {
+      const w = ok.filter(e => e.m.through);
+      if (!w.length) return need('Enter which child of the ancestor each match descends through, and the shared cM and generations.');
+      const groups = [];
+      w.forEach(e => { const g = groups.find(x => x.t.toLowerCase() === e.m.through.toLowerCase()); if (g) g.list.push(e); else groups.push({ t: e.m.through, list: [e] }); });
+      return done(`${groups.map(g => `Through ${esc(g.t)}: ${g.list.map(nm).join(', ')}`).join('; ')}.`);
+    }
+    case 'a-rel':
+      if (!checked) return need('Enter the shared cM and both generations for each match.');
+      return bad.length ? no(`Not for ${bad.map(e => `${nm(e)} (${e.cm} cM is outside the usual range for ${esc(e.doc.name.toLowerCase())})`).join('; ')}.`)
+        : ok.length ? done(`Yes: ${ok.map(e => `${nm(e)}, ${e.cm} cM fits ${esc(e.doc.name.toLowerCase())}`).join('; ')}.`)
+        : lead('The matches are too distant, or share too little DNA, to rely on.');
+    case 'a-who': {
+      const est = ev.filter(e => e.best != null);
+      if (!est.length) return need('Enter the shared cM for each match.');
+      return lead(`${est.map(e => `${nm(e)}: ${e.cm} cM, most likely ${AUTO_REL[e.best]}${e.g1 != null && e.best - e.g1 >= 1 ? `, about ${e.best - e.g1} generations back from the match` : ''}`).join('; ')}.`);
+    }
+  }
+  return null;
 }
 /* ----- Lineage Society: proof of the line one generation at a time, with DNA support where the records fall short ----- */
 const SOC_STATUS = ['Missing', 'Partly proven', 'Proven'];
@@ -1299,7 +1479,7 @@ function tabReport(a) {
     <h2>Genetic Distance</h2>
     ${simpleTable(['Pair', 'Markers', 'GD', 'GD group', 'Consistent?', 'Interpretation'], a.gdPairs.map(p => { const e = pairEval(a, p); return [esc(testerLabel(e.ta) + ' – ' + testerLabel(e.tb)), e.markers == null ? '—' : e.markers, e.gd == null ? '—' : e.gd, e.group ? esc(e.group.label) : '—', ynPill(e.within), esc(p.interp)]; }))}
     ${a.gdPairs.map(p => reportGDChart(a, pairEval(a, p))).join('')}${a.gdPairs.some(p => pairGens(a, pairEval(a, p))) ? reportKey([['anc', 'Ancestor'], ['est', 'GD estimate']]) : ''}`;
-      return (snpFirst(a) ? [snp, docs, gd] : [gd, docs, snp]).join('');
+      return (autoFirst(a) ? [autoReportHTML(a), docs] : snpFirst(a) ? [snp, docs, gd] : [gd, docs, snp]).join('');
     })()}
     <h2>Convergence Analysis</h2>
     ${simpleTable(['Evidence type', 'Result', 'Consistent?', 'Notes'], ev.map(e => { const c = a.conv[e.key] || {}; const ok = c.ov === 'Y' ? true : c.ov === 'N' ? false : e.ok; return [esc(e.type), esc(e.result), ynPill(ok), esc(c.note)]; }).concat(a.extraEvidence.map(x => [esc(x.type), esc(x.result), x.ok === 'Y' ? ynPill(true) : x.ok === 'N' ? ynPill(false) : ynPill(null), ''])))}
@@ -1895,6 +2075,7 @@ function newRow(coll) {
   if (coll === 'testers') { r.label = 'Tester ' + String.fromCharCode(65 + (rec().testers.length % 26)); r.test = testTypes(rec())[0]; }
   if (coll === 'conflicts') { r.type = CONFLICT_TYPES[0]; r.status = 'Open'; }
   if (coll === 'socGens') r.status = 'Missing';
+  if (coll === 'atMatches') { const prev = rec().atMatches.slice(-1)[0]; r.company = prev ? prev.company : AUTO_COMPANIES[0]; if (prev) { r.tester = prev.tester; r.testerGens = prev.testerGens; } }
   if (coll === 'limits') { r.type = LIMIT_TYPES[0]; }
   return r;
 }
@@ -2007,13 +2188,21 @@ document.addEventListener('click', e => {
     case 'nav': view = { page: el.dataset.page, id: null, tab: 'overview' }; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
     case 'open-ancestor': view = { page: 'ancestor', id: el.dataset.id, tab: el.dataset.tab || 'checklist' }; reportPick = el.dataset.id; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
     case 'add-ancestor': {
-      const anc = fixAncestor({ id: uid(), name: 'New ancestor' });
+      const anc = fixAncestor({ id: uid(), name: 'New ancestor', testChosen: false });
       S.ancestors.push(anc); saveData();
       view = { page: 'ancestor', id: anc.id, tab: 'checklist' }; app.classList.remove('menu-open'); render();
       const nameInput = document.querySelector('[data-anc="name"]');
       if (nameInput) { nameInput.focus(); nameInput.select(); }
       break;
     }
+    case 'del-card': {
+      const x = S.ancestors.find(y => y.id === el.dataset.id);
+      if (x && confirm(`Delete ${x.name || 'this ancestor'} and all of its research? This cannot be undone.`)) {
+        S.ancestors = S.ancestors.filter(y => y.id !== x.id); saveData(); render();
+      }
+      break;
+    }
+    case 'back-test': { const t = cur(); t.testChosen = false; saveData(); render(); window.scrollTo(0, 0); break; }
     case 'del-ancestor':
       if (a && confirm(`Delete ${a.name || 'this ancestor'} and all of its research? This cannot be undone.`)) {
         S.ancestors = S.ancestors.filter(x => x.id !== a.id); saveData();
@@ -2038,7 +2227,7 @@ document.addEventListener('click', e => {
     case 'pick-calc': pickCalc(view.page, el.dataset.id); break;
     case 'load-example': e.preventDefault(); loadExample(); break;
     case 'start-case': {
-      const anc = fixAncestor({ id: uid(), name: 'New ancestor', method: el.dataset.m || '' });
+      const anc = fixAncestor({ id: uid(), name: 'New ancestor', method: el.dataset.m || '', testChosen: true });
       S.ancestors.push(anc); saveData();
       view = { page: 'ancestor', id: anc.id, tab: 'checklist' }; render(); window.scrollTo(0, 0);
       break;
@@ -2066,6 +2255,7 @@ document.addEventListener('click', e => {
     }
     case 'tab': view.tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
     case 'ostep': view.ostep = Number(el.dataset.n); render(); window.scrollTo(0, 0); break;
+    case 'choose-test': { const a = cur(); a.method = el.dataset.m; a.testChosen = true; saveData(); view.tab = 'checklist'; render(); window.scrollTo(0, 0); break; }
     case 'add-row': if (a) { a[el.dataset.coll].push(newRow(el.dataset.coll)); saveData(); render(); } break;
     /* One comparison for every pair of testers not already compared; a pair compared before brings back its GD and markers. */
     case 'add-all-pairs': if (a) {

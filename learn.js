@@ -184,6 +184,75 @@ const CHECKLISTS = {
       ]]
     ]
   },
+  autosomal: {
+    title: "Pre-Research Checklist for Autosomal DNA Testers",
+    purpose: "Ensure matches, shared DNA, and documented lines are in place for accurate, methodical analysis of the recent generations of a line.",
+    sections: [
+      ["Autosomal Data", [
+        ["Confirm testing company (AncestryDNA, Family Finder, 23andMe, MyHeritage)", "Determines which match list and tools are available"],
+        ["Access the full match list", "Required to find the matches who descend from the ancestor"],
+        ["Record shared cM and longest segment", "Forms the basis for estimating each relationship"],
+        ["Consider uploading raw data to other sites", "Widens the pool of matches beyond one company"]
+      ]],
+      ["Matches", [
+        ["Identify matches with family trees", "Allows the shared ancestor to be found"],
+        ["Find matches who descend from the ancestor", "Focuses analysis on the relevant line"],
+        ["Note which child each match descends through", "Separates the branches of the family"],
+        ["Group matches using shared matches", "Shows which matches belong to the same line"]
+      ]],
+      ["Shared DNA Review", [
+        ["Compare shared cM to the expected range", "Tests whether the documented relationship fits"],
+        ["Treat shared cM as a range", "Avoids reading one amount of DNA as one exact relationship"],
+        ["Set aside matches under 7 cM", "Small segments can be shared by chance"],
+        ["Note intermarriage or double relationships", "Extra shared DNA can make cousins appear closer than they are"]
+      ]],
+      ["Generations", [
+        ["Count generations from each person to the ancestor", "Allows the documented relationship to be worked out"],
+        ["Work out the documented relationship", "Provides the expected range for comparison"],
+        ["Expect reliable results to about 6th cousins", "Beyond that, shared DNA is too small or too rare to rely on"],
+        ["Remember not every cousin shares DNA", "A missing match does not disprove a relationship"]
+      ]],
+      ["Genealogy", [
+        ["Document the line to the ancestor", "Provides the historical framework for comparison"],
+        ["Record names, dates, locations", "Enables alignment with genetic data"],
+        ["Document each match's line down from the ancestor", "Confirms the match's descent rests on records"],
+        ["Note gaps or conflicts", "Highlights areas requiring further investigation"]
+      ]],
+      ["Context", [
+        ["Identify geographic origins", "Connects matches to real-world locations"],
+        ["Look for shared surnames and places in matches' trees", "Points to the line the shared DNA came through"],
+        ["Ensure historical plausibility", "Prevents conclusions that conflict with known history"]
+      ]],
+      ["Data Reliability", [
+        ["Evaluate source quality", "Ensures conclusions are based on credible evidence"],
+        ["Check matches' trees against records", "Unsourced online trees can repeat the same error"],
+        ["Prioritize verified evidence", "Strengthens overall conclusions"]
+      ]],
+      ["Core Concepts", [
+        ["Understand centimorgans (cM)", "Measures the amount of DNA shared"],
+        ["Understand segments", "Longer segments usually come from a more recent shared ancestor"],
+        ["Understand random inheritance", "Each child inherits a different half, so shared DNA varies"],
+        ["Understand autosomal reach", "Tests recent generations on every line, not just the direct male line"]
+      ]],
+      ["Method Readiness", [
+        ["Apply shared DNA + genealogy together", "Ensures conclusions are based on multiple lines of evidence"],
+        ["Avoid single-match conclusions", "Prevents overreliance on one match"],
+        ["Test across multiple branches", "Matches through different children confirm consistency"],
+        ["Add Y-DNA where possible", "Extends the direct male line beyond autosomal reach"]
+      ]],
+      ["Mindset", [
+        ["Actively analyze (not passive)", "Requires engagement with data, not observation"],
+        ["Avoid forcing conclusions", "Prevents bias in interpretation"],
+        ["Stay objective", "Ensures conclusions reflect evidence, not assumptions"]
+      ]],
+      ["Final Check", [
+        ["Select matches", "Defines scope of analysis"],
+        ["Organize data", "Prepares for efficient comparison"],
+        ["Prepare formulas/tools", "Ensures calculations can be performed correctly"],
+        ["Begin analysis", "Proceed with structured methodology"]
+      ]]
+    ]
+  },
   nontester: {
     title: "Pre-Research Checklist for Non-Testers",
     purpose: "Ensure a structured comparison of genealogy against project-based Y-DNA data, allowing lineage placement to be narrowed through SNP alignment, grouping structure, and elimination, while recognizing the limits of non-tested research.",
