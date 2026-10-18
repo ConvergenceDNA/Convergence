@@ -365,7 +365,9 @@ const METHODS = [
 ];
 function snpFirst(a) { return a.method === 'SNP'; }
 function methodOrder(a, list) { const i = list.indexOf('str'), j = list.indexOf('snp'); if (!snpFirst(a) || i < 0 || j < 0) return list; const r = list.slice(); r[i] = 'snp'; r[j] = 'str'; return r; }
-function tabsFor(a) { const t = TABS.filter(x => x[0] !== 'snp' || snpUsed(a)); return methodOrder(a, t.map(x => x[0])).map(k => t.find(x => x[0] === k)); }
+function tabsFor(a) { const t = TABS.filter(x => (x[0] !== 'snp' || snpUsed(a)) && (x[0] !== 'society' || wantsSociety(a))); return methodOrder(a, t.map(x => x[0])).map(k => t.find(x => x[0] === k)); }
+/* The Lineage Society step only appears when the research question is about proving the line to a society. */
+function wantsSociety(a) { const q = inquiryOf(a); return !!q && /society$/.test(q.v); }
 function render() {
   const main = document.getElementById('main');
   const crumb = document.getElementById('crumb');
@@ -424,6 +426,7 @@ function renderHome() {
 function renderAncestor(a) {
   const st = (snpFirst(a) ? [['SNP', snpStatus(a)], ['Genealogy', genealogyStatus(a)], ['STR', strStatus(a)]] : [['STR', strStatus(a)], ['Genealogy', genealogyStatus(a)], ['SNP', snpStatus(a)]]).filter(s => s[0] !== 'SNP' || snpUsed(a));
   if (view.tab === 'snp' && !snpUsed(a)) view.tab = 'overview';
+  if (view.tab === 'society' && !wantsSociety(a)) view.tab = 'overview';
   const list = tabsFor(a), idx = Math.max(0, list.findIndex(t => t[0] === view.tab));
   const tabs = list.map((t, i) => `<button class="tab${view.tab === t[0] ? ' active' : ''}${i < idx ? ' done' : ''}" data-act="tab" data-tab="${t[0]}"><span class="num">${i < idx ? '✓' : i + 1}</span>${t[1]}</button>`).join('');
   /* Every step explains what to do, then Back / Continue move through the steps in order. */
@@ -496,12 +499,12 @@ function guideFor(a, tab) {
     alignment: { q: 'Does each tester\'s family tree match the DNA?', help: 'For each tester, compare his documented line with what the DNA shows. Enter his earliest documented ancestor and where the family lived. Choose <b>Yes</b> if the paper trail and the DNA agree, <b>No</b> if they do not, and note any gaps or conflicts, such as a missing generation or a possible non-paternal event (NPE).' },
     snp: { q: 'Map the testers\' SNP tree', help: 'Every Big Y-700 tester has an SNP path: his newest SNP first, then older SNPs he shares with other men. The tree below draws all the testers\' paths together, oldest SNP at the top, so you can see where their lines branch apart and where they meet. Type or choose the ancestor in whom each SNP formed, if you know him. Then enter the FTDNA date of the SNP where the lines meet, and the app checks it against the generations.' },
     convergence: { q: 'Does the evidence agree?', help: 'Here the STR, genealogy and SNP evidence are weighed together. The chart shows how much of it supports the lineage and how much contradicts it. Review each line of evidence, change it if you know better, and record any conflict with its likely cause and how you plan to resolve it.' },
-    society: { q: 'Proving the line to a lineage society', help: 'If you are applying to a lineage society (such as the DAR, SAR or the Mayflower Society), set out the proof one generation at a time, from the applicant up to the qualifying ancestor. For each generation give the birth, marriage and death with their sources, and the record that proves he or she was the child of the next generation. Where the records cannot prove a link, the DNA evidence from this case can support it. Each society sets its own rules for DNA, so check its current policy. If you are not applying to a society, click Continue.' },
+    society: { q: 'Proving the line to a lineage society', help: 'If you are applying to a lineage society (such as the DAR, SAR or the Mayflower Society), set out the proof one generation at a time, from the applicant up to the qualifying ancestor. For each generation give the birth, marriage and death with their sources, and the record that proves he or she was the child of the next generation. Where the records cannot prove a link, the DNA evidence from this case can support it. Each society sets its own rules for DNA, so check its current policy.' },
     report: { q: 'Your research report', help: 'This is the summary of the case, in the order you worked. Download it as a Word document or print it. Conclusions stay provisional: new records or test results can change them.' }
   };
   /* SNP-first: the step's advice also says what to look for, for the question the user chose. */
   const inq = inquiryOf(a);
-  const qTab = snpFirst(a) ? 'snp' : 'str';
+  const qTab = wantsSociety(a) ? 'society' : snpFirst(a) ? 'snp' : 'str';
   if (tab === qTab && inq && G[qTab]) return { q: G[qTab].q, help: `${G[qTab].help}<br><b>For your question (${esc(inq.q)}):</b> ${inq.focus}` };
   return G[tab] || null;
 }
@@ -571,6 +574,15 @@ const STR_INQUIRIES = [
     focus: 'Compare testers across the groups. Close or intermediate matches mean the groups are related; only distant matches mean they are not, in recent times.',
     answer: 'e.g. "GD 3 on 111: related, likely within the last 10 to 15 generations."' }
 ];
+/* Both methods: proving the line to a lineage society, with this case's DNA as support. */
+INQUIRIES.push({ v: 'society', q: 'Can I prove this line to a lineage society?',
+  needs: 'The documented line from the applicant up to the qualifying ancestor, with sources for each generation, and the society\'s rules.',
+  focus: 'On the Lineage Society step, prove each generation in turn. Where a link has no paper proof, the SNP evidence from this case can support it, if the society accepts DNA.',
+  answer: 'e.g. "Ready to submit: all 9 generations are proven."' });
+STR_INQUIRIES.push({ v: 's-society', q: 'Can I prove this line to a lineage society?',
+  needs: 'The documented line from the applicant up to the qualifying ancestor, with sources for each generation, and the society\'s rules.',
+  focus: 'On the Lineage Society step, prove each generation in turn. Where a link has no paper proof, the GD evidence from this case can support it, if the society accepts DNA.',
+  answer: 'e.g. "Ready to submit: all 9 generations are proven."' });
 function inquiryList(a) { return snpFirst(a) ? INQUIRIES : STR_INQUIRIES; }
 function inquiryOf(a) { return inquiryList(a).find(x => x.v === a.inquiry) || null; }
 /* STR-first: whether the GD comparisons entered so far answer the chosen question. */
@@ -622,6 +634,7 @@ function inquiryStatus(a) {
   if (!inq) return null;
   const need = m => ({ c: 'amber', label: 'Not answered yet', msg: m }), done = m => ({ c: 'green', label: 'Answered', msg: m });
   const lead = m => ({ c: 'amber', label: 'Lead found', msg: m }), no = m => ({ c: 'red', label: 'Answered: no', msg: m });
+  if (/society$/.test(inq.v)) { const r = societyReadiness(a); return r.c === 'green' ? done(r.msg) : r.c === 'amber' ? lead(r.msg) : need(r.msg); }
   if (!snpFirst(a)) return strInquiryStatus(a, inq, need, done, lead, no);
   const paths = a.testers.filter(t => pathOf(t).length), tgt = targetSNP(a), yr = num(a.ftdnaDate);
   const rows = a.testers.map(t => genRow(a, t)).filter(r => r.diff != null && r.gens != null);
@@ -672,7 +685,8 @@ function ancPrompt(a) {
     branch: { q: 'Who is the ancestor of the family?', help: 'Enter the man the known branches all descend from, if you know him, with his birth and death years (estimates are fine) and where he lived.' },
     npe: { q: 'Who is the ancestor of the surname group?', help: 'Enter the earliest documented man of the surname group the tester expected to match, with his birth and death years (estimates are fine) and where he lived.' },
     origin: { q: 'Who is the immigrant ancestor?', help: 'Enter the man who came to the new country, as far back as the records go, with his birth and death years (estimates are fine) and where he settled.' },
-    groups: { q: 'Who is the earliest ancestor you are comparing?', help: 'Enter the earliest documented man of one of the family groups, with his birth and death years (estimates are fine) and where he lived. Note the other group\'s ancestor in your notes.' }
+    groups: { q: 'Who is the earliest ancestor you are comparing?', help: 'Enter the earliest documented man of one of the family groups, with his birth and death years (estimates are fine) and where he lived. Note the other group\'s ancestor in your notes.' },
+    society: { q: 'Who is the qualifying ancestor?', help: 'Enter the ancestor the society application is based on (for example, the patriot or passenger), as his name appears in the records, with his birth and death years and where he lived.' }
   };
   const inq = inquiryOf(a);
   return (inq && P[inq.v.replace(/^s-/, '')]) || { q: 'Who is the ancestor?', help: 'Enter the man you believe the testers descend from. Use his name as it appears in the records, his birth and death years (estimates are fine) and where he lived. His birth year is used to work out each tester\'s years per generation.' };
@@ -1130,7 +1144,7 @@ function societyDNA(a) {
 function tabSociety(a) {
   const st = societyReadiness(a), dna = societyDNA(a), yn = v => v === 'Yes' ? 'Yes' : '—';
   const genLabel = r => `${a.socGens.indexOf(r) + 1}${a.socGens.indexOf(r) === 0 ? ' <span class="muted">(applicant)</span>' : ''}`;
-  return `<div class="card">
+  return `${inquiryCard(a)}<div class="card">
     <h3>The society</h3>
     <div class="grid3">${field('Lineage society', 'socName', a.socName, { ph: 'e.g. Sons of the American Revolution' })}${field('Qualifying ancestor', 'socQualifying', a.socQualifying, { ph: a.name || 'e.g. William Hartwell' })}${field('Member, ancestor or application numbers', 'socNumber', a.socNumber, { ph: 'e.g. Ancestor # A012345' })}</div>
   </div>
