@@ -284,7 +284,7 @@ function verdict(a) {
   const st = [snpUsed(a) ? snpStatus(a) : null, autoFirst(a) ? autoStatus(a) : strStatus(a), genealogyStatus(a)].filter(Boolean);
   const open = openConflicts(a);
   if (st.some(s => s.c === 'red')) return { c: 'red', title: 'Conflict in the evidence', msg: 'Record and resolve the conflict before drawing a conclusion.' };
-  if (st.every(s => s.c === 'green') && !open) return { c: 'green', title: 'Convergence achieved', msg: `All ${st.length === 3 ? 'three' : 'two'} lines of evidence align. The conclusion should remain open to revision as new evidence emerges.` };
+  if (st.every(s => s.c === 'green') && !open) return { c: 'green', title: 'Convergence achieved', msg: `${st.length === 3 ? 'All three' : 'Both'} lines of evidence align. The conclusion should remain open to revision as new evidence emerges.` };
   if (open) return { c: 'amber', title: 'Unresolved conflicts', msg: `${open} conflict(s) still open on the Convergence tab.` };
   return { c: 'amber', title: 'Research in progress', msg: 'Not every line of evidence has been tested yet.' };
 }
@@ -467,19 +467,20 @@ function startHereHTML() {
   const sel = (name, opts) => `<select data-start="${name}"><option value="">— choose —</option>${opts.map(o => `<option value="${o[0]}"${startAns[name] === o[0] ? ' selected' : ''}>${o[1]}</option>`).join('')}</select>`;
   return `<div class="card">
     <h3>Start here</h3>
-    <p class="hint">New to Y-DNA research? Answer two questions and the app will show you where to begin and what to gather first. Not sure yet? <a href="#" data-act="load-example">Look at a finished example</a> first.</p>
+    <p class="hint">New to Y-DNA research? Answer two questions and the app will show you where to begin and what to gather first. Not sure yet? Look at a finished <a href="#" data-act="load-example">Y-DNA example</a> or <a href="#" data-act="load-example" data-k="auto">autosomal example</a> first.</p>
     <div class="grid2">
       <div class="field"><label>1. Have you, or a relative on the line you are researching, taken a DNA test?</label>${sel('tested', [['Y', 'Yes'], ['N', 'No, not yet']])}</div>
       ${t === 'Y' ? `<div class="field"><label>2. Which test?</label>${sel('test', [['snp', 'Big Y-700'], ['str', 'Y-37, Y-67 or Y-111'], ['auto', 'An autosomal test (AncestryDNA, Family Finder, 23andMe or MyHeritage)']])}</div>` : ''}
     </div>
     ${P ? `<div class="verdict" style="margin-top:14px;display:block"><b>${P.title}</b><div class="hint" style="margin:4px 0 10px">${P.why}</div>
       <b>Gather these first:</b><ul style="margin:6px 0 12px 18px">${P.gather.map(x => `<li>${x}</li>`).join('')}</ul>
-      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : key === 'auto' ? 'AUTO' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example">Look at a finished example</button></div></div>` : ''}
+      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : key === 'auto' ? 'AUTO' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example" data-k="${key === 'auto' ? 'auto' : ''}">Look at a finished example</button></div></div>` : ''}
   </div>`;
 }
 /* A finished example case for a made-up family, so a beginner can see what good entries look like at every step. */
-function loadExample() {
-  let a = S.ancestors.find(x => x.example);
+function loadExample(kind) {
+  if (kind === 'auto') return loadAutoExample();
+  let a = S.ancestors.find(x => x.example && x.method !== 'AUTO');
   if (!a) {
     const t = (id, label, birth, path, line, location) => ({ id, label, birth, generations: '10', test: 'Big Y-700', path, line, location });
     a = fixAncestor({ id: uid(), example: true, name: 'William Hartwell (example)', birth: '1580', death: '1642', place: 'Kent, England', method: 'SNP', inquiry: 'right',
@@ -496,6 +497,27 @@ function loadExample() {
     saveData();
   }
   view = { page: 'ancestor', id: a.id, tab: 'testers' };
+  render(); window.scrollTo(0, 0);
+}
+/* The autosomal example: made-up matches who descend from one ancestor, on her side of the family. */
+function loadAutoExample() {
+  let a = S.ancestors.find(x => x.example && x.method === 'AUTO');
+  if (!a) {
+    const m = (match, matchGens, cm, longest, through, company) => ({ id: uid(), tester: 'Ruth Calloway', testerGens: '4', match, matchGens, company, cm, longest, through });
+    a = fixAncestor({ id: uid(), example: true, name: 'Martha Ellison (example)', birth: '1798', death: '1871', place: 'Wilkes County, North Carolina', method: 'AUTO', inquiry: 'a-child',
+      notes: 'Ruth Calloway descends from Martha Ellison through her son William. Which of Martha\'s other children do Ruth\'s matches descend from?',
+      atMatches: [m('Daniel Ellison', '4', '92', '31', 'her son James', 'AncestryDNA'),
+        m('Carol Pruitt', '3', '141', '38', 'her daughter Sarah', 'AncestryDNA'),
+        m('Henry Ellison', '5', '47', '19', 'her son James', 'MyHeritage'),
+        m('Lois Barker', '4', '6', '6', 'her son James', '23andMe')],
+      documents: [
+        { id: uid(), type: 'Marriage', date: '1817', place: 'Wilkes County, North Carolina', source: 'Wilkes County marriage bonds', notes: 'Marriage of Martha Greer and Isaac Ellison', supports: 'Y' },
+        { id: uid(), type: 'Census', date: '1850', place: 'Wilkes County, North Carolina', source: '1850 U.S. census', notes: 'Martha Ellison, 52, with sons James and William', supports: 'Y' },
+        { id: uid(), type: 'Probate / Will', date: '1871', place: 'Wilkes County, North Carolina', source: 'Will of Martha Ellison, Wilkes County will book', notes: 'Names her children James, Sarah and William', supports: 'Y' }] });
+    S.ancestors.push(a);
+    saveData();
+  }
+  view = { page: 'ancestor', id: a.id, tab: 'matches' };
   render(); window.scrollTo(0, 0);
 }
 function renderHome() {
@@ -1297,7 +1319,7 @@ function autoEvidenceRow(a) {
 }
 /* Generation chart for one match: generations back from the match, with the documented ancestor and the estimate from the shared cM. */
 function autoChart(e) {
-  if (e.best == null || e.g1 == null || !e.fits.length) return '';
+  if (e.best == null || e.g1 == null || !e.fits.length || (e.check && e.check.ok === null)) return '';
   const est = e.best - e.g1, lo = Math.max(1, Math.min(...e.fits) - e.g1), hi = Math.max(...e.fits) - e.g1;
   if (est < 1 || hi < 1) return '';
   const A = e.g2 || 0, G = Math.min(30, Math.max(A, est));
@@ -2225,7 +2247,7 @@ document.addEventListener('click', e => {
       }
       break;
     case 'pick-calc': pickCalc(view.page, el.dataset.id); break;
-    case 'load-example': e.preventDefault(); loadExample(); break;
+    case 'load-example': e.preventDefault(); loadExample(el.dataset.k); break;
     case 'start-case': {
       const anc = fixAncestor({ id: uid(), name: 'New ancestor', method: el.dataset.m || '', testChosen: true });
       S.ancestors.push(anc); saveData();
