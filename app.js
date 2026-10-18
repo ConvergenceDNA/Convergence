@@ -759,7 +759,7 @@ function testTypes(a) { return snpFirst(a) ? ['Big Y-700'] : ['Y-111', 'Y-67', '
 function tabTesters(a) {
   return `<div class="card">
     <div class="card-head"><h3>Testers descending from ${esc(a.name || 'this ancestor')}</h3></div>
-    ${snpFirst(a) ? '<p class="hint"><b>SNP path</b>: enter the tester\'s terminal SNP, his newest one, in FamilyTreeDNA Discover and open <b>Ancestral Path</b>. Copy the SNPs from his terminal SNP back toward this ancestor, separated by commas.</p>' : ''}
+    ${snpFirst(a) ? '<p class="hint"><b>SNP path</b>: enter the tester\'s terminal SNP, his newest one, in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open <b>Ancestral Path</b>. Copy the SNPs from his terminal SNP back toward this ancestor, separated by commas.</p>' : ''}
     ${editTable('testers', [
       { k: 'label', label: 'Tester', ph: 'e.g. John Hartwell' },
       { k: 'line', label: 'Earliest documented ancestor', w: 170, ph: 'e.g. William Hartwell' },
@@ -941,7 +941,7 @@ function tabSNP(a) {
   </div>
   <div class="card">
     <div class="card-head"><h3>2. Where the lines meet</h3></div>
-    <p class="hint">The lowest SNP that all the testers share is where their lines come together.${shared ? ` From the paths entered it is <b>${esc(shared)}</b>.` : ''} Look it up in FamilyTreeDNA Discover and enter its formation date.</p>
+    <p class="hint">The lowest SNP that all the testers share is where their lines come together.${shared ? ` From the paths entered it is <b>${esc(shared)}</b>.` : ''} Look it up in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and enter its formation date.</p>
     <div class="grid3">${field('Shared SNP', 'targetSNP', a.targetSNP, { ph: shared || 'e.g. R-Y11201', hint: shared ? `Leave blank to use ${esc(shared)}.` : 'Worked out from the SNP paths.' })}${field('FTDNA formation date', 'ftdnaDate', a.ftdnaDate, { type: 'number', ph: 'e.g. 1601', hint: 'From FamilyTreeDNA Discover.' })}${field('Documented birth year of SNP', 'snpDocBirth', a.snpDocBirth, { type: 'number', ph: 'e.g. 1450', hint: 'Optional: the birth year of the documented man in whom the SNP formed, if records show him.' })}</div>
     ${(() => {
       /* Optional check: FTDNA's date against the documented birth of the man the SNP formed in (within one SNP interval). */
