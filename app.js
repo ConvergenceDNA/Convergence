@@ -44,6 +44,8 @@ function fixAncestor(a) {
   /* Cases made before the test was asked first count as chosen; a new ancestor picks its test before anything else. */
   if (a.testChosen === undefined) a.testChosen = true;
   if (!a.id) a.id = uid();
+  /* Each test is its own case; the cases of one ancestor share a person id. */
+  if (!a.pid) a.pid = a.id;
   return a;
 }
 let savedTimer = null;
@@ -80,6 +82,60 @@ function yearFmt(n) { return n == null || !isFinite(n) ? '—' : String(Math.rou
 function cur() { return S.ancestors.find(a => a.id === view.id); }
 /* Every ancestor except the built-in example, which is reached from Start here and kept out of the lists and the SNP tree. */
 function realAncestors() { return S.ancestors.filter(a => !a.example); }
+/* One ancestor can have a case for each test: SNP-first, STR-first and autosomal-first. */
+function casesOfPid(pid) { return S.ancestors.filter(x => x.pid === pid).sort((x, y) => ['SNP', '', 'AUTO'].indexOf(x.method || '') - ['SNP', '', 'AUTO'].indexOf(y.method || '')); }
+function casesOf(a) { return casesOfPid(a.pid); }
+function peopleOf(list) { const seen = []; list.forEach(a => { if (!seen.includes(a.pid)) seen.push(a.pid); }); return seen.map(casesOfPid); }
+function methodName(a) { return !a.testChosen ? 'Choose a test' : a.method === 'SNP' ? 'SNP-first' : a.method === 'AUTO' ? 'Autosomal-first' : 'STR-first'; }
+function dnaStatus(a) { return a.method === 'SNP' ? snpStatus(a) : a.method === 'AUTO' ? autoStatus(a) : strStatus(a); }
+function dotClass(v) { return v.c === 'green' ? 'green' : v.c === 'red' ? 'red' : ''; }
+/* All of an ancestor's tests weighed together: the more tests that agree with the records, the stronger the conclusion. */
+function personVerdict(cs) {
+  const done = cs.filter(c => c.testChosen), vs = done.map(verdict), n = done.length;
+  if (!n) return { c: 'amber', title: 'No test chosen yet', msg: 'Choose a test to begin.' };
+  const names = list => list.map(c => methodName(c)).join(', ');
+  if (vs.some(v => v.c === 'red')) return { c: 'red', title: 'Conflict in the evidence', msg: `The ${names(done.filter((c, i) => vs[i].c === 'red'))} research shows a conflict. Resolve it before drawing a conclusion.` };
+  if (vs.every(v => v.c === 'green')) return { c: 'green', title: 'Convergence achieved', msg: n > 1 ? `All ${n} tests agree with the records: ${names(done)}. The conclusion should remain open to revision as new evidence emerges.` : vs[0].msg };
+  const g = vs.filter(v => v.c === 'green').length;
+  return { c: 'amber', title: 'Research in progress', msg: n > 1 ? `${g} of ${n} tests agree with the records so far.` : vs[0].msg };
+}
+function personSummaryHTML(cs) {
+  const v = personVerdict(cs);
+  const rows = cs.map(c => {
+    if (!c.testChosen) return `<tr><td><a href="#" data-act="open-ancestor" data-id="${c.id}" style="color:var(--accent);font-weight:600;text-decoration:none">Choose a test</a></td><td colspan="3" class="muted">No test chosen yet.</td></tr>`;
+    const s = dnaStatus(c), g = genealogyStatus(c), cv = verdict(c);
+    return `<tr><td><a href="#" data-act="open-ancestor" data-id="${c.id}" style="color:var(--accent);font-weight:600;text-decoration:none">${methodName(c)}</a></td><td><i class="dot ${s.c}"></i> ${esc(s.msg)}</td><td><i class="dot ${g.c}"></i> ${esc(g.msg)}</td><td>${pill(cv.c, cv.title)}</td></tr>`;
+  }).join('');
+  return `<div class="verdict ${v.c}" style="display:block;margin:0 0 14px"><b>${v.title}</b><div class="hint" style="margin-top:4px">${v.msg}</div></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Test</th><th>DNA evidence</th><th>Records</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+/* The ancestor's own page: every test for him, weighed together, and a way to add another. */
+function renderPerson(cs) {
+  const a = cs[0], used = cs.filter(c => c.testChosen).map(c => c.method || '');
+  const missing = [['SNP', 'SNP-first', 'Big Y-700'], ['', 'STR-first', 'Y-37, Y-67 or Y-111'], ['AUTO', 'Autosomal-first', 'AncestryDNA, Family Finder, 23andMe or MyHeritage']].filter(m => !used.includes(m[0]));
+  return `<div class="anc-header"><div><h1>${esc(a.name || 'Unnamed ancestor')}</h1>
+      <div class="anc-meta">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}</div></div></div>
+  <div class="card"><h3>All tests for this ancestor</h3>
+    <p class="hint">Each test is its own case with its own steps. Here they are weighed together: the more tests that agree with the records, the stronger the conclusion. Click a test to open it.</p>
+    ${personSummaryHTML(cs)}
+    <div class="tbl-actions" style="margin-top:14px"><button class="btn" data-act="open-report" data-id="${a.id}">Open the ${cs.length > 1 ? 'combined ' : ''}report</button></div></div>
+  ${missing.length ? `<div class="card"><h3>Add another test</h3>
+    <p class="hint">Start a new case for this ancestor with another test. The name, dates and place are copied over and kept the same across all the tests.</p>
+    <div class="tbl-actions">${missing.map(m => `<button class="btn ghost" data-act="add-case" data-pid="${esc(a.pid)}" data-m="${m[0]}">+ ${m[1]} <span class="muted" style="font-weight:normal">(${m[2]})</span></button>`).join('')}</div></div>` : ''}`;
+}
+/* Reports: every test for one ancestor in a single report, with the combined result first. */
+function combinedReport(cs) {
+  const a = cs[0];
+  return `<div class="card report">
+    <div class="card-head no-print"><span class="hint">A printable summary of all the tests for this ancestor.</span><div class="tbl-actions" style="margin:0"><button class="btn small ghost" data-act="download-report">Download (Word)</button><button class="btn small" data-act="print">Print</button></div></div>
+    <h1>${esc(a.name || 'Unnamed ancestor')}</h1>
+    <p class="muted">${[lifeYears(a), a.place, 'Report generated ' + new Date().toLocaleDateString()].filter(Boolean).map(esc).join(' · ')}</p>
+    <h2>Combined Convergence</h2>
+    ${personSummaryHTML(cs)}
+    ${cs.map(c => `<div style="margin-top:30px;padding-top:6px;border-top:2px solid #ddc6a1">${tabReport(c, methodName(c) + ' research')}</div>`).join('')}
+    <p class="hint" style="margin-top:18px">All conclusions should be considered provisional pending new genetic or documentary evidence.</p>
+  </div>`;
+}
 /* The record being edited: an ancestor, or a non-tester research case. */
 function rec() { return view.page === 'project' ? curProject() : cur(); }
 function lifeYears(a) {
@@ -396,13 +452,15 @@ function renderSidebar() {
       <div class="sh-top"><span class="dot"></span><span class="anc-name">${esc(h.name)}</span><span class="anc-years">${esc(h.side)}</span></div>
       <div class="sh-where">${lines(h.w).slice(0, 3).map(x => `<div>${esc(x)}</div>`).join('')}</div></div>`).join('') : '<div class="side-empty">No matches.</div>';
   } else {
-    const list = realAncestors().sort((x, y) => (x.name || '').localeCompare(y.name || ''));
-    box.innerHTML = list.length ? list.map(a => {
-      const v = verdict(a);
-      return `<div class="anc-item${view.page === 'ancestor' && view.id === a.id ? ' active' : ''}" data-act="open-ancestor" data-id="${a.id}">
-      <span class="dot ${v.c === 'green' ? 'green' : v.c === 'red' ? 'red' : ''}"></span>
+    /* Each ancestor once, with his tests listed underneath. */
+    const groups = peopleOf(realAncestors()).sort((x, y) => (x[0].name || '').localeCompare(y[0].name || ''));
+    box.innerHTML = groups.length ? groups.map(cs => {
+      const a = cs[0], here = (view.page === 'person' && view.id === a.pid) || (view.page === 'ancestor' && cs.some(c => c.id === view.id));
+      return `<div class="anc-item${view.page === 'person' && view.id === a.pid ? ' active' : ''}" data-act="open-person" data-id="${esc(a.pid)}">
+      <span class="dot ${dotClass(personVerdict(cs))}"></span>
       <span class="anc-name">${esc(a.name || 'Unnamed ancestor')}</span>
-      <span class="anc-years">${esc(lifeYears(a))}</span></div>`;
+      <span class="anc-years">${esc(lifeYears(a))}</span></div>
+      <div class="anc-cases">${cs.map(c => `<div class="anc-item anc-case${view.page === 'ancestor' && view.id === c.id ? ' active' : ''}" data-act="open-ancestor" data-id="${c.id}"><span class="dot ${c.testChosen ? dotClass(verdict(c)) : ''}"></span><span class="anc-name">${methodName(c)}</span></div>`).join('')}${here && cs.length < 3 ? `<div class="anc-item anc-case anc-add" data-act="open-person" data-id="${esc(a.pid)}">+ Add another test</div>` : ''}</div>`;
     }).join('') : '<div class="side-empty">No ancestors yet.</div>';
   }
   document.querySelectorAll('.side-nav a').forEach(el => el.classList.toggle('active', el.dataset.page === view.page || (view.page === 'project' && el.dataset.page === 'projects')));
@@ -429,12 +487,17 @@ function render() {
   const main = document.getElementById('main');
   const crumb = document.getElementById('crumb');
   if (view.page === 'ancestor' && !cur()) view = { page: 'home', id: null, tab: 'overview' };
+  if (view.page === 'person' && !casesOfPid(view.id).length) view = { page: 'home', id: null, tab: 'overview' };
   if (view.page === 'project' && !curProject()) view = { page: 'projects', id: null, tab: 'groups' };
   let html = '';
   if (view.page === 'ancestor') {
     const a = cur();
-    crumb.innerHTML = `<a data-act="nav" data-page="home">Home</a> › ${esc(a.name || 'Unnamed ancestor')}`;
+    crumb.innerHTML = `<a data-act="nav" data-page="home">Home</a> › <a data-act="open-person" data-id="${esc(a.pid)}">${esc(a.name || 'Unnamed ancestor')}</a> › ${methodName(a)}`;
     html = renderAncestor(a);
+  } else if (view.page === 'person') {
+    const cs = casesOfPid(view.id);
+    crumb.innerHTML = `<a data-act="nav" data-page="home">Home</a> › ${esc(cs[0].name || 'Unnamed ancestor')}`;
+    html = renderPerson(cs);
   } else if (view.page === 'project') {
     const p = curProject();
     crumb.innerHTML = `<a data-act="nav" data-page="projects">Non-Tester Research</a> › ${esc(p.name || 'Unnamed research')}`;
@@ -555,11 +618,12 @@ function renderHome() {
     ['Resolve conflicts', 'Where they disagree, find the cause: a gap in the records, an unknown parent, or the wrong line.'],
     ['Report', 'The answer to your question, how strongly the evidence agrees, and what is still open.']
   ];
-  const cards = realAncestors().map(a => {
-    const v = verdict(a);
-    return `<div class="anc-card" data-act="open-ancestor" data-id="${a.id}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><h3>${esc(a.name || 'Unnamed ancestor')}</h3><button class="btn small danger" data-act="del-card" data-id="${a.id}">Delete</button></div>
-      <div class="hint">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}</div></div>`;
+  const cards = peopleOf(realAncestors()).map(cs => {
+    const a = cs[0];
+    return `<div class="anc-card" data-act="open-person" data-id="${esc(a.pid)}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><h3>${esc(a.name || 'Unnamed ancestor')}</h3><button class="btn small danger" data-act="del-card" data-id="${esc(a.pid)}">Delete</button></div>
+      <div class="hint">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}</div>
+      <div class="hint" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 16px">${cs.map(c => `<span><i class="dot ${c.testChosen ? dotClass(verdict(c)) : ''}" style="margin-right:5px"></i>${methodName(c)}</span>`).join('')}</div></div>`;
   }).join('');
   return `
   <div class="hero">
@@ -578,7 +642,7 @@ function chooseTestHTML(a) {
     ['', 'STR-first', 'Y-37, Y-67 or Y-111 from FamilyTreeDNA', 'You start with the testers\' marker matches and their Genetic Distance.'],
     ['SNP', 'SNP-first', 'Big Y-700 from FamilyTreeDNA', 'You start by mapping the testers\' SNP tree and where their lines meet.'],
     ['AUTO', 'Autosomal-first', 'AncestryDNA, FamilyTreeDNA Family Finder, 23andMe or MyHeritage', 'You start with your DNA matches and how much DNA you share.']
-  ];
+  ].filter(o => !casesOf(a).some(x => x.id !== a.id && x.testChosen && (x.method || '') === o[0]));
   return `<div class="anc-header"><div><h1>${esc(a.name || 'New ancestor')}</h1></div></div>
   <div class="wiz-head"><div class="wiz-step">Before you begin</div><h2 class="wiz-q">Which DNA test do you have?</h2><div class="wiz-help"><b>What to do:</b> Choose the test you, or the testers on this line, have taken. It sets the checklist and the steps that follow. You can change it later on the Overview step, under Goal → More options.</div></div>
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">${opts.map(o => `<div class="card" style="margin:0;display:flex;flex-direction:column;gap:10px">
@@ -605,7 +669,7 @@ function renderAncestor(a) {
   return `
   <div class="anc-header">
     <div><h1>${esc(a.name || 'Unnamed ancestor')}</h1>
-      <div class="anc-meta">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}</div></div>
+      <div class="anc-meta">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}${lifeYears(a) || a.place ? ' · ' : ''}${methodName(a)}</div></div>
     <div class="mini-lights">${st.map(s => `<span><i class="dot ${s[1].c}"></i>${s[0]}</span>`).join('')}</div>
   </div>
   ${a.example ? '<div class="verdict amber no-print" style="display:block;margin-bottom:14px"><b>This is an example with made-up data.</b> <span class="hint">Click Back and Continue to see what a finished case looks like at every step. When you are done, delete it on the Overview step: Goal → More options → Delete this ancestor.</span></div>' : ''}${guide}${body(a)}${nav}`;
@@ -635,24 +699,32 @@ function reportGenChart(a, r) {
   return rcLabel(`${esc(testerLabel(r.t))} · ${G} generations back to ${esc(a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}`) + rcTable(`<tr>${gens}</tr>${snpRow}`);
 }
 /* GD chart for one STR comparison: generations back to the ancestor, with the GD estimate placed on them. */
+/* GD generation chart, shared by the ancestor's comparisons and the GD calculator. A is the documented generations (0 if unknown).
+   The chart runs to the ancestor, or further when the estimate falls beyond him, so the estimate always shows. */
+function gdChart(q, A, label) {
+  const G = Math.min(60, A ? Math.max(A, q.mid) : q.hi);
+  /* When the estimate falls on the ancestor's own generation, the box is bronze with the ancestor's dark border, so both show. */
+  const gens = Array.from({ length: G }, (_, j) => j + 1 === q.mid && j + 1 === A ? rcCell('est', j + 1).replace('border:1px solid #a8762f', 'border:3px solid #15303c') : rcCell(j + 1 === A ? 'anc' : j + 1 === q.mid ? 'est' : 'gen', j + 1)).join('');
+  return rcLabel(label) + rcTable(`<tr>${gens}</tr>`);
+}
 function reportGDChart(a, e) {
   const q = pairGens(a, e);
   if (!q) return '';
-  const G = Math.min(60, Math.max(num(e.ta && e.ta.generations) || 0, num(e.tb && e.tb.generations) || 0) || q.hi);
-  /* When the estimate falls on the ancestor's own generation, the box is bronze with the ancestor's dark border, so both show. */
-  const gens = Array.from({ length: G }, (_, j) => j + 1 === q.mid && j + 1 === G ? rcCell('est', j + 1).replace('border:1px solid #a8762f', 'border:3px solid #15303c') : rcCell(j + 1 === G ? 'anc' : j + 1 === q.mid ? 'est' : 'gen', j + 1)).join('');
+  const A = Math.max(num(e.ta && e.ta.generations) || 0, num(e.tb && e.tb.generations) || 0);
   /* The differing markers, when they were entered, listed in the same order as the two testers in the title. */
   const diffs = e.rows.length ? `<div style="font-size:13px;color:#1f2b33;margin-top:4px"><b>Differing markers:</b> ${e.rows.map(r => `${esc(r.m)} ${esc(String(r.a))} vs ${esc(String(r.b))}`).join(' · ')}</div>` : '';
-  return rcLabel(`${esc(testerLabel(e.ta))} vs ${esc(testerLabel(e.tb))} · GD ${e.gd} on ${e.markers} markers · estimate ${q.mid} generations`) + rcTable(`<tr>${gens}</tr>`) + diffs;
+  return gdChart(q, A, `${esc(testerLabel(e.ta))} vs ${esc(testerLabel(e.tb))} · GD ${e.gd} on ${e.markers} markers · estimate ${q.mid} generations`) + diffs;
 }
 /* Reports (left menu): pick an ancestor and open his report to read, print or download. */
 let reportPick = '';
 function renderReports() {
   if (!S.ancestors.length) return '<h1>Reports</h1><p class="muted">No ancestors yet. Create an ancestor to see his report here.</p>';
   if (!cur()) view.id = (S.ancestors.find(x => x.id === reportPick) || S.ancestors[0]).id;
+  /* One entry per ancestor; an ancestor with more than one test gets one combined report. */
+  const cs = casesOf(cur()).filter(c => c.testChosen);
   return `<h1 class="no-print">Reports</h1>
-  <div class="field no-print" style="max-width:420px;margin-bottom:16px"><label>Ancestor</label><select id="rep-pick">${S.ancestors.map(x => `<option value="${esc(x.id)}"${x.id === view.id ? ' selected' : ''}>${esc(ancLabel(x))}</option>`).join('')}</select></div>
-  ${tabReport(cur())}`;
+  <div class="field no-print" style="max-width:420px;margin-bottom:16px"><label>Ancestor</label><select id="rep-pick">${peopleOf(S.ancestors).map(g => `<option value="${esc(g[0].id)}"${g.some(x => x.id === view.id) ? ' selected' : ''}>${esc(ancLabel(g[0]))}${g.length > 1 ? ` · ${g.length} tests` : ''}</option>`).join('')}</select></div>
+  ${cs.length > 1 ? combinedReport(cs) : tabReport(cur())}`;
 }
 /* Plain-language instructions for each step. */
 function guideFor(a, tab) {
@@ -886,7 +958,7 @@ function tabOverview(a) {
         ${inquiryOf(a) ? `<div class="field full"><div class="hint"><b>You need:</b> ${inquiryOf(a).needs}<br><b>What to look for:</b> ${inquiryOf(a).focus}<br><b>The answer looks like:</b> ${esc(inquiryOf(a).answer)}</div></div>` : ''}
         ${field('Your notes (optional)', 'notes', a.notes, { type: 'textarea', full: true, ph: 'e.g. John and Samuel Hartwell both believe they descend from William Hartwell' })}
         <details class="gd-doc" style="grid-column:1 / -1"><summary>More options</summary><div class="grid3" style="margin-top:8px">
-          <div class="field"><label>Change test</label><select data-anc="method">${METHODS.map(o => `<option value="${o.v}"${(a.method || '') === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select></div>
+          <div class="field"><label>Change test</label><select data-anc="method">${METHODS.filter(o => o.v === (a.method || '') || !casesOf(a).some(x => x.id !== a.id && x.testChosen && (x.method || '') === o.v)).map(o => `<option value="${o.v}"${(a.method || '') === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select></div>
           ${field('Fallback Years Per Generation (YPG)', 'ypg', a.ypg, { type: 'number', ph: `Default ${S.settings.ypg}`, hint: 'Only used for a tester whose own YPG can\'t be calculated.' })}
           <div class="field"><label>&nbsp;</label><button class="btn small danger" data-act="del-ancestor">Delete this ancestor</button></div>
         </div></details>` }
@@ -1495,15 +1567,16 @@ function tabSociety(a) {
     <p class="hint" style="margin-top:14px">DNA supports the documentary proof; it does not replace it. Check the society's current requirements before submitting.</p>
   </div>`;
 }
-function tabReport(a) {
+function tabReport(a, sub) {
   const v = verdict(a), tgt = targetSNP(a), shared = sharedSNP(a.testers);
   const rows = a.testers.map(t => genRow(a, t));
   const ev = autoEvidence(a);
   const today = new Date().toLocaleDateString();
-  return `<div class="card report">
-    <div class="card-head no-print"><span class="hint">A printable summary of this research case.</span><div class="tbl-actions" style="margin:0"><button class="btn small ghost" data-act="download-report">Download (Word)</button><button class="btn small" data-act="print">Print</button></div></div>
-    <h1>${esc(a.name || 'Unnamed ancestor')}</h1>
-    <p class="muted">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''} · Report generated ${esc(today)}</p>
+  /* sub: one test inside the combined report, under its own heading. */
+  return `${sub ? '' : `<div class="card report">
+    <div class="card-head no-print"><span class="hint">A printable summary of this research case.</span><div class="tbl-actions" style="margin:0"><button class="btn small ghost" data-act="download-report">Download (Word)</button><button class="btn small" data-act="print">Print</button></div></div>`}
+    <h1>${esc(sub || a.name || 'Unnamed ancestor')}</h1>
+    ${sub ? '' : `<p class="muted">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''} · Report generated ${esc(today)}</p>`}
     ${inquiryOf(a) ? `<p><b>Question:</b> ${esc(inquiryOf(a).q)} ${pill(inquiryStatus(a).c, inquiryStatus(a).label)}<br><span class="muted">${inquiryStatus(a).msg}</span></p>` : ''}
     ${a.notes ? `<p>${esc(a.notes)}</p>` : ''}
     <h2>Convergence of Evidence</h2>
@@ -1531,8 +1604,8 @@ function tabReport(a) {
     ${simpleTable(['Evidence type', 'Result', 'Consistent?', 'Notes'], ev.map(e => { const c = a.conv[e.key] || {}; const ok = c.ov === 'Y' ? true : c.ov === 'N' ? false : e.ok; return [esc(e.type), esc(e.result), ynPill(ok), esc(c.note)]; }).concat(a.extraEvidence.map(x => [esc(x.type), esc(x.result), x.ok === 'Y' ? ynPill(true) : x.ok === 'N' ? ynPill(false) : ynPill(null), ''])))}
     <h2>Conflicts</h2>
     ${simpleTable(['Type', 'Source', 'Possible cause', 'Resolution path', 'Status'], a.conflicts.map(c => [esc(c.type), esc(c.source), esc(c.cause), esc(c.path), esc(c.status || 'Open')]))}
-    <p class="hint" style="margin-top:18px">All conclusions should be considered provisional pending new genetic or documentary evidence.</p>
-  </div>`;
+    ${sub ? '' : `<p class="hint" style="margin-top:18px">All conclusions should be considered provisional pending new genetic or documentary evidence.</p>
+  </div>`}`;
 }
 
 /* ---------- Quick Calculators ---------- */
@@ -1731,7 +1804,9 @@ function gdGenChart(q, card) {
 /* ----- Quick Calculator result ----- */
 function gdCalcResult(card, n, g) {
   const names = STR_MARKERS.slice(0, Number(g('panel')) || 37);
-  const pr = panelRate(names), missing = pr.missing;
+  /* The same estimate as an ancestor's GD comparison: the mutation rate setting, the years, the GD group and the generation chart. */
+  const k = n('rate') > 0 ? n('rate') : rateCal(), A = n('gens') >= 1 ? Math.round(n('gens')) : 0;
+  const pr = panelRate(names, k), missing = pr.missing;
   if (missing.length || !(pr.R > 0)) return `${pill('red', 'No estimate')} <span class="muted">${missing.length ? 'No mutation rate for: ' + esc(missing.join(', ')) : 'The total mutation rate is zero.'}</span>`;
   const R = pr.R;
   /* Differing markers, if entered: they set the GD and switch to the marker-by-marker model. */
@@ -1743,7 +1818,7 @@ function gdCalcResult(card, n, g) {
   if (outside.length) return `${pill('red', 'Check the markers')} <span class="muted">${esc(outside.join(', '))} ${outside.length > 1 ? 'are' : 'is'} not in the Y-${names.length} panel. Choose a larger panel or remove ${outside.length > 1 ? 'them' : 'it'}.</span>`;
   if (gd == null) return '<span class="muted">Enter the GD and choose the markers compared.</span>';
   if (!Number.isInteger(gd) || gd < 0) return '<span class="muted">The GD must be a whole number (0, 1, 2…).</span>';
-  const ll = useRows ? markerLogLik(names, diffs) : null;
+  const ll = useRows ? markerLogLik(names, diffs, k) : null;
   const ypg = n('ypg') > 0 ? n('ypg') : 33;
   const q = wholeGens(sRange(gd, R, null, ll));
   let rowsNote = '';
@@ -1752,9 +1827,13 @@ function gdCalcResult(card, n, g) {
     const plain = wholeGens(sRange(gd, R));
     rowsNote = `<div class="hint" style="margin-top:4px">Using the differing markers entered: ${list.join(', ') || 'none'}. GD ${gd}${typed != null && typed !== gd ? ` <span style="color:var(--red)">(you typed ${typed}; the markers add up to ${gd})</span>` : ''}${dup.length ? ` · ${esc(dup.join(', '))} entered twice, the last one is used` : ''}. From the GD alone the estimate would be ${plain.mid} (${plain.lo} to ${plain.hi}).</div>`;
   }
+  const grp = gdGroup(gd), fits = A ? (A >= q.lo && A <= q.hi) : null;
   return `<div class="big">≈ ${q.mid} generations</div>
-    <div>Likely range ${q.lo} to ${q.hi} generations</div>${gdGenChart(q, card)}${rowsNote}
-    <div class="hint" style="margin-top:6px">${pill('amber', 'Estimate')} About 90% likely to fall in this range if the mutation rates are right. GD ${gd} on ${names.length} markers · corrected total rate ${R.toFixed(4)}.</div>
+    <div>Likely range ${q.lo} to ${q.hi} generations · ≈ ${fmt(q.mid * ypg, 0)} years (${fmt(q.lo * ypg, 0)} to ${fmt(q.hi * ypg, 0)})</div>${rowsNote}
+    ${A ? `<div style="margin-top:6px">${pill(fits ? 'green' : 'red', fits ? 'Consistent' : 'Outside the range')} <span class="muted">The ${A} documented generations ${fits ? 'fall inside' : 'fall outside'} the likely range.</span></div>` : ''}
+    ${gdChart(q, A, `GD ${gd} on ${names.length} markers · estimate ${q.mid} generations`)}${reportKey(A ? [['anc', 'Ancestor'], ['est', 'GD estimate']] : [['est', 'GD estimate']])}
+    <div class="hint" style="margin-top:10px">${pill(grp.c, grp.label)} ${gdSuggestion(gd, names.length, grp)}</div>
+    <div class="hint" style="margin-top:6px">${pill('amber', 'Estimate')} About 90% likely to fall in this range if the mutation rates are right. GD ${gd} on ${names.length} markers · mutation rate setting ${fmt(k, 2)} · corrected total rate ${R.toFixed(4)}.</div>
     <details class="pair-diffs"><summary>How this is calculated</summary><p class="hint">${GD_NOTE}${useRows ? ' Each differing marker uses its own mutation rate.' : ''}</p></details>`;
 }
 /* The optional differing-markers table. */
@@ -1775,12 +1854,59 @@ function gdDiffRowsHTML() {
     <div class="tbl-actions"><button type="button" class="btn small ghost" data-gd-act="add">+ Add a marker</button></div>
   </details>`;
 }
+/* The custom mutation rate: other matches in the same family whose generations are known from the records. */
+function gdFitRowHTML() {
+  return `<tr class="gd-fit-row"><td><input data-fit-gd type="number" min="0" placeholder="e.g. 2"></td>
+    <td><select data-fit-m>${GD_PANELS.map(o => `<option value="${o.v}"${o.v === '111' ? ' selected' : ''}>Y-${o.v}</option>`).join('')}</select></td>
+    <td><input data-fit-g type="number" min="1" placeholder="e.g. 8"></td>
+    <td><button type="button" class="row-btn" data-gd-act="fit-del" title="Remove">✕</button></td></tr>`;
+}
+function gdFitRowsHTML() {
+  return `<p class="hint" style="margin:0 0 8px">Every family mutates a little faster or slower than average. For each pair of testers whose common ancestor is documented, enter their GD, the markers compared and how many generations each is from that ancestor (a tester's father is generation 1). Several pairs give a more reliable result than one.</p>
+    <table class="tbl gd-fit-tbl"><thead><tr><th>GD</th><th>Markers compared</th><th>Documented generations</th><th></th></tr></thead><tbody>${gdFitRowHTML()}</tbody></table>
+    <div class="tbl-actions"><button type="button" class="btn small ghost" data-gd-act="fit-add">+ Add another known match</button></div>`;
+}
+/* Family Mutation Rate calculator: the best-fit setting, and what it does to each documented pair. */
+function rateCalcResult(card) {
+  const known = [...card.querySelectorAll('.gd-fit-row')].map(r => ({ gd: num(r.querySelector('[data-fit-gd]').value), m: Number(r.querySelector('[data-fit-m]').value), G: num(r.querySelector('[data-fit-g]').value) }))
+    .filter(d => Number.isInteger(d.gd) && d.gd >= 0 && d.G >= 1);
+  if (!known.length) return '<span class="muted">Enter the GD and documented generations for at least one pair of testers.</span>';
+  const best = gdCustomFit(known), k0 = rateCal();
+  const est = (d, k) => { const pr = panelRate(STR_MARKERS.slice(0, d.m), k); return pr.missing.length || !(pr.R > 0) ? null : wholeGens(sRange(d.gd, pr.R)); };
+  const rows = known.map(d => { const a = est(d, k0), b = est(d, best.k); return `<tr><td class="calc">GD ${d.gd} on ${d.m}</td><td class="calc">${d.G}</td><td class="calc">${a ? `${a.mid} (${a.lo}–${a.hi})` : '—'}</td><td class="calc">${b ? `${b.mid} (${b.lo}–${b.hi})` : '—'}</td></tr>`; }).join('');
+  const same = Math.abs(best.k - k0) < 0.001;
+  return `<div class="big">${fmt(best.k, 2)}</div>
+    <div>Best-fit setting from ${known.length} documented pair${known.length === 1 ? '' : 's'}${same ? ' · the same as your current setting' : ` · your current setting is ${fmt(k0, 2)}`}</div>
+    <div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Pair</th><th>Documented generations</th><th>Estimate now (${fmt(k0, 2)})</th><th>Estimate at ${fmt(best.k, 2)}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    ${known.length < 3 ? '<div class="hint" style="margin-top:8px">With only one or two pairs, chance has a big effect. Add more documented pairs for a more reliable setting.</div>' : ''}
+    <div class="tbl-actions" style="margin-top:10px"><button type="button" class="btn small" data-gd-act="rate-to-gd" data-v="${best.k}">Use it in the GD calculator</button>${same ? '' : `<button type="button" class="btn small ghost" data-gd-act="rate-default" data-v="${best.k}">Make it my default</button>`}</div>
+    <div class="hint" style="margin-top:6px">A lower setting gives longer estimates; a higher one gives shorter estimates. "Make it my default" changes the setting in Settings, which every ancestor uses unless it has its own. To set it for one family only, enter it on that ancestor's STR Analysis step.</div>`;
+}
+/* The setting (0.30 to 1.50) whose estimates come closest to the documented generations of the known matches. */
+function gdCustomFit(list) {
+  if (!list.length) return null;
+  const mid = (d, k) => { const pr = panelRate(STR_MARKERS.slice(0, d.m), k); return pr.missing.length || !(pr.R > 0) ? null : wholeGens(sRange(d.gd, pr.R)).mid; };
+  let best = null;
+  for (let i = 30; i <= 150; i += 5) {
+    const k = i / 100, err = list.reduce((t, d) => { const m = mid(d, k); return t + (m == null ? 0 : Math.abs(m - d.G)); }, 0);
+    if (!best || err < best.err) best = { k, err };
+  }
+  return best;
+}
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-gd-act]');
   if (!el) return;
-  const card = el.closest('[data-calc]'), body = card.querySelector('.gd-diff-tbl tbody');
-  if (el.dataset.gdAct === 'add') body.insertAdjacentHTML('beforeend', gdDiffRowHTML());
-  else { el.closest('tr').remove(); if (!body.children.length) body.insertAdjacentHTML('beforeend', gdDiffRowHTML()); }
+  const card = el.closest('[data-calc]'), act = el.dataset.gdAct;
+  if (act === 'rate-to-gd') {
+    pickCalc('calcs', 'gd');
+    const gdCard = document.querySelector('[data-calc="gd"]');
+    if (gdCard) { gdCard.querySelector('[data-in="rate"]').value = el.dataset.v; runCalc(gdCard); }
+    return;
+  }
+  if (act === 'rate-default') { S.settings.rateCal = Number(el.dataset.v); saveData(); runCalc(card); return; }
+  const fit = act.startsWith('fit-'), body = card.querySelector(fit ? '.gd-fit-tbl tbody' : '.gd-diff-tbl tbody'), row = fit ? gdFitRowHTML : gdDiffRowHTML;
+  if (act === 'add' || act === 'fit-add') body.insertAdjacentHTML('beforeend', row());
+  else { el.closest('tr').remove(); if (!body.children.length) body.insertAdjacentHTML('beforeend', row()); }
   runCalc(card);
 });
 
@@ -1815,6 +1941,7 @@ function calcCard(id, title, formula, inputs, extra = '') {
     <div class="grid2">${inputs.map(i => `<div class="field${i.full ? ' full' : ''}"><label>${i.label}</label>${i.type === 'textarea'
       ? `<textarea data-in="${i.k}" placeholder="${esc(i.ph || '')}"></textarea>`
       : i.type === 'diffrows' ? gdDiffRowsHTML()
+      : i.type === 'fitrows' ? gdFitRowsHTML()
       : i.type === 'linrows' ? '<div class="lin-rows"></div>'
       : i.type === 'gdnames' ? '<details class="gd-doc"><summary>Name the generations (optional)</summary><div class="gd-names" style="margin-top:8px"><p class="hint">Enter a GD first.</p></div></details>'
       : i.type === 'select'
@@ -1839,8 +1966,13 @@ const CALC_DEFS = {
   gd: { group: 'STR markers', name: 'Genetic Distance (GD)', card: () => calcCard('gd', 'Generations to the MRCA from Genetic Distance', 'Enter the GD from FamilyTreeDNA and the number of markers compared.', [
     { k: 'gd', label: 'Genetic Distance (GD)', ph: 'e.g. 3' },
     { k: 'panel', label: 'Markers compared', type: 'select', opts: GD_PANELS },
-    { k: 'diffs', label: '', type: 'diffrows', full: true },
-    { k: 'names', label: '', type: 'gdnames', full: true }
+    { k: 'gens', label: 'Documented generations (optional)', ph: 'e.g. 8', hint: 'From the records: how many generations each tester is from their common ancestor (a tester\'s father is generation 1).' },
+    { k: 'ypg', label: 'Years per generation (optional)', ph: 'e.g. 33', hint: 'Used to turn generations into years. 33 if left blank.' },
+    { k: 'rate', label: 'Mutation rate setting (optional)', ph: `Default ${fmt(rateCal(), 2)}`, hint: 'The same setting as an ancestor\'s STR step. Leave blank to use the one in Settings, or work out your family\'s own with the Family Mutation Rate calculator.' },
+    { k: 'diffs', label: '', type: 'diffrows', full: true }
+  ]) },
+  rate: { group: 'STR markers', name: 'Family Mutation Rate', card: () => calcCard('rate', 'Family Mutation Rate', 'Finds the mutation rate setting that best fits your family\'s documented lines', [
+    { k: 'fit', label: 'STR matches whose generations are known from the records', type: 'fitrows', full: true }
   ]) },
   cm: { group: 'Autosomal DNA', name: 'Shared cM Calculator', card: () => calcCard('cm', 'Shared cM Calculator', 'Possible relationships for an amount of shared DNA', [{ k: 'cm', label: 'Shared cM', ph: 'e.g. 850' }]) },
   contrib: { group: 'Autosomal DNA', name: 'Ancestral DNA Contribution', card: () => calcCard('contrib', 'Ancestral DNA Contribution', 'Expected share = 100% ÷ 2^generations', [{ k: 'gens', label: 'Generations back (parent = 1)', ph: 'e.g. 4' }]) },
@@ -1848,7 +1980,7 @@ const CALC_DEFS = {
   segments: { group: 'Autosomal DNA', name: 'Ancestor Segment Alignment', card: () => calcCard('segments', 'Ancestor Segment Alignment', 'Finds overlapping segments between matches', [{ k: 'segs', label: 'Segments: chromosome, start, end, match (one per line)', type: 'textarea', full: true, ph: 'e.g.\n7, 12000000, 34000000, John\n7, 20000000, 40000000, Mary' }]) }
 };
 const CALC_PAGES = {
-  calcs: { title: 'Calculators', intro: 'The SNP and STR formulas from <i>Y-DNA Lineage Reconstruction</i>. Inside an ancestor\'s workspace these run automatically from your tester data.', ids: ['ypg', 'gps', 'lineage', 'yps', 'birth', 'gendist', 'genyears', 'align', 'mrca', 'gd'] },
+  calcs: { title: 'Calculators', intro: 'The SNP and STR formulas from <i>Y-DNA Lineage Reconstruction</i>. Inside an ancestor\'s workspace these run automatically from your tester data.', ids: ['ypg', 'gps', 'lineage', 'yps', 'birth', 'gendist', 'genyears', 'align', 'mrca', 'gd', 'rate'] },
   autosomal: { title: 'Autosomal DNA Tools', intro: 'Supporting tools for autosomal DNA. Figures are approximate averages.', ids: ['cm', 'contrib', 'survival', 'segments'] }
 };
 /* Remembers the last calculator opened on each page (this device only). */
@@ -1974,6 +2106,7 @@ function runCalc(card) {
       else { const ib = pb.indexOf(normSNP(pa[idx])); html = big(esc(pa[idx])) + `lowest shared SNP · ${idx + 1} SNP(s) back for Tester A, ${ib + 1} for Tester B`; }
     } break;
     case 'gd': html = gdCalcResult(card, n, g); break;
+    case 'rate': html = rateCalcResult(card); break;
     /* Autosomal */
     case 'cm': if (has('cm')) html = cmRelationships(n('cm')); break;
     case 'contrib': if (has('gens') && n('gens') >= 1) { const g2 = n('gens'); const pct = 100 / Math.pow(2, g2); html = big(fmt(pct, pct < 1 ? 3 : 2) + '%') + `expected DNA from one ancestor ${g2} generation(s) back · about ${fmt(AUTO_CM * 2 * pct / 100, 0)} cM of the ~${AUTO_CM * 2} cM total`; } break;
@@ -2060,11 +2193,12 @@ async function downloadReport(a, kind = 'report') {
   if (!el) return;
   const copy = el.cloneNode(true);
   copy.querySelectorAll('.no-print').forEach(x => x.remove());
-  const chart = copy.querySelector('.conv-chart svg');
-  if (chart) {
+  /* Every convergence chart becomes a picture: the combined report has one for each test. */
+  const live = [...el.querySelectorAll('.conv-chart svg')], charts = [...copy.querySelectorAll('.conv-chart svg')];
+  for (let i = 0; i < charts.length; i++) {
     let png = null;
-    try { png = await chartToPNG(el.querySelector('.conv-chart svg')); } catch (e) { /* the counts still show as text */ }
-    if (png) chart.outerHTML = `<img src="${png}" width="170" height="170" alt="Convergence chart">`; else chart.remove();
+    try { png = await chartToPNG(live[i]); } catch (e) { /* the counts still show as text */ }
+    if (png) charts[i].outerHTML = `<img src="${png}" width="170" height="170" alt="Convergence chart">`; else charts[i].remove();
   }
   const css = 'body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#222}h1{font-family:Georgia,serif;font-size:22pt;margin:0 0 4pt}h2{font-family:Georgia,serif;font-size:14pt;margin:16pt 0 6pt;border-bottom:1px solid #ccc}table{border-collapse:collapse;width:100%;margin-bottom:8pt}th,td{border:1px solid #ccc;padding:4pt 6pt;text-align:left;vertical-align:top;font-size:10pt}th{background:#f2efe8}.muted,.hint{color:#666}.verdict{border:1px solid #ccc;padding:6pt 10pt;margin:10pt 0}.pill{font-weight:bold}';
   const html = `<html><head><meta charset="utf-8"><title>${esc(a.name || 'Report')}</title><style>${css}</style></head><body>${copy.innerHTML.replace(/var\((--[\w-]+)\)/g, (m, v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim() || '#999')}</body></html>`;
@@ -2174,6 +2308,8 @@ document.addEventListener('change', e => {
     if (d.coll === 'gdPairs') { if (pairKey(row) !== oldKey) recallPair(a, row, oldKey); rememberPair(a, row); }
   } else if (d.anc && a) {
     a[d.anc] = el.value;
+    /* The name, dates and place stay the same across all of an ancestor's tests. */
+    if (view.page === 'ancestor' && ['name', 'birth', 'death', 'place'].includes(d.anc)) casesOf(a).forEach(x => { x[d.anc] = el.value; });
   } else if (d.pdiff && a) {
     const pr = a.gdPairs.find(x => x.id === d.pdiff);
     if (!pr) return;
@@ -2242,19 +2378,32 @@ document.addEventListener('click', e => {
       break;
     }
     case 'del-card': {
-      const x = S.ancestors.find(y => y.id === el.dataset.id);
-      if (x && confirm(`Delete ${x.name || 'this ancestor'} and all of its research? This cannot be undone.`)) {
-        S.ancestors = S.ancestors.filter(y => y.id !== x.id); saveData(); render();
+      const cs = casesOfPid(el.dataset.id);
+      if (cs.length && confirm(`Delete ${cs[0].name || 'this ancestor'} and ${cs.length > 1 ? `the research for its ${cs.length} tests` : 'all of its research'}? This cannot be undone.`)) {
+        S.ancestors = S.ancestors.filter(y => y.pid !== el.dataset.id); saveData(); render();
       }
       break;
     }
+    case 'open-person': e.preventDefault(); view = { page: 'person', id: el.dataset.id, tab: 'overview' }; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
+    case 'open-report': view = { page: 'reports', id: el.dataset.id, tab: 'overview' }; reportPick = el.dataset.id; render(); window.scrollTo(0, 0); break;
+    case 'add-case': {
+      const src = casesOfPid(el.dataset.pid)[0];
+      if (!src) break;
+      const c = fixAncestor({ id: uid(), pid: src.pid, name: src.name, birth: src.birth, death: src.death, place: src.place, method: el.dataset.m, testChosen: true });
+      S.ancestors.push(c); saveData();
+      view = { page: 'ancestor', id: c.id, tab: 'checklist' }; render(); window.scrollTo(0, 0);
+      break;
+    }
     case 'back-test': { const t = cur(); t.testChosen = false; saveData(); render(); window.scrollTo(0, 0); break; }
-    case 'del-ancestor':
-      if (a && confirm(`Delete ${a.name || 'this ancestor'} and all of its research? This cannot be undone.`)) {
+    case 'del-ancestor': {
+      /* With other tests for the same ancestor, only this test's research is deleted. */
+      const others = a ? casesOf(a).filter(x => x.id !== a.id) : [];
+      if (a && confirm(others.length ? `Delete the ${methodName(a)} research for ${a.name || 'this ancestor'}? The other tests are kept. This cannot be undone.` : `Delete ${a.name || 'this ancestor'} and all of its research? This cannot be undone.`)) {
         S.ancestors = S.ancestors.filter(x => x.id !== a.id); saveData();
-        view = { page: 'home', id: null, tab: 'overview' }; render();
+        view = others.length ? { page: 'person', id: a.pid, tab: 'overview' } : { page: 'home', id: null, tab: 'overview' }; render();
       }
       break;
+    }
     case 'open-project': view = { page: 'project', id: el.dataset.id, tab: el.dataset.tab || 'checklist' }; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
     case 'add-project': {
       const p = fixProject({ id: uid(), name: 'New non-tester research' });
