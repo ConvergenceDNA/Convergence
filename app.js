@@ -76,6 +76,8 @@ function fmt(n, d = 1) {
 }
 function yearFmt(n) { return n == null || !isFinite(n) ? '—' : String(Math.round(n)); }
 function cur() { return S.ancestors.find(a => a.id === view.id); }
+/* Every ancestor except the built-in example, which is reached from Start here and kept out of the lists and the SNP tree. */
+function realAncestors() { return S.ancestors.filter(a => !a.example); }
 /* The record being edited: an ancestor, or a non-tester research case. */
 function rec() { return view.page === 'project' ? curProject() : cur(); }
 function lifeYears(a) {
@@ -338,18 +340,58 @@ function pill(c, text) { return `<span class="pill ${c}">${esc(text)}</span>`; }
 function ynPill(v) { return v === true ? pill('green', 'Yes') : v === false ? pill('red', 'No') : pill('', '—'); }
 
 /* ---------- Render: sidebar ---------- */
+/* Search: finds the words typed in names, places, testers, SNPs, documents and non-tester research, and says where. */
+function searchHits(q) {
+  const has = v => v != null && String(v).toLowerCase().includes(q), out = [];
+  realAncestors().forEach(a => {
+    const w = [], add = (label, tab) => { if (!w.some(x => x.label === label)) w.push({ label, tab }); };
+    if (has(a.name)) add('Name', 'checklist');
+    if (has(a.place)) add(`Place: ${a.place}`, 'overview');
+    if (has(a.notes)) add('Research notes', 'overview');
+    a.testers.forEach(t => {
+      if (has(t.label)) add(`Tester: ${testerLabel(t)}`, 'testers');
+      if (has(t.line)) add(`Earliest ancestor: ${t.line}`, 'testers');
+      if (has(t.location)) add(`Location: ${t.location}`, 'testers');
+      pathOf(t).filter(has).forEach(x => add(`SNP: ${x}`, snpUsed(a) ? 'snp' : 'testers'));
+    });
+    if (has(a.targetSNP)) add(`SNP: ${a.targetSNP}`, 'snp');
+    a.documents.forEach(d => { if (['type', 'date', 'place', 'source', 'notes'].some(k => has(d[k]))) add(`Document: ${[d.type, d.date, d.place].filter(Boolean).join(', ')}`, 'documents'); });
+    (a.socGens || []).forEach(g => { if (has(g.name) || has(g.spouse)) add(`Lineage society: ${g.name || g.spouse}`, 'society'); });
+    if (w.length) out.push({ kind: 'ancestor', id: a.id, name: a.name || 'Unnamed ancestor', side: lifeYears(a), w });
+  });
+  (S.projects || []).forEach(p => {
+    const w = [], add = (label, tab) => { if (!w.some(x => x.label === label)) w.push({ label, tab }); };
+    if (has(p.name) || has(p.surname) || has(p.projectName)) add(`Research: ${p.name || p.surname}`, 'groups');
+    if (has(p.earliest)) add(`Earliest ancestor: ${p.earliest}`, 'geo');
+    if (has(p.locations)) add(`Place: ${p.locations}`, 'geo');
+    p.groups.forEach(g => {
+      if (has(g.name) || has(g.origin) || has(g.earliest) || has(g.region)) add(`Grouping: ${groupName(g)}`, 'groups');
+      if (has(g.snps)) add(`SNP: ${g.snps}`, 'snpseg');
+    });
+    if (w.length) out.push({ kind: 'project', id: p.id, name: p.name || 'Unnamed research', side: 'Non-tester', w });
+  });
+  return out;
+}
 function renderSidebar() {
-  const q = searchText.trim().toLowerCase();
-  const list = S.ancestors
-    .filter(a => !q || (a.name || '').toLowerCase().includes(q))
-    .sort((x, y) => (x.name || '').localeCompare(y.name || ''));
-  document.getElementById('ancestor-list').innerHTML = list.length ? list.map(a => {
-    const v = verdict(a);
-    return `<div class="anc-item${view.page === 'ancestor' && view.id === a.id ? ' active' : ''}" data-act="open-ancestor" data-id="${a.id}">
+  const q = searchText.trim().toLowerCase(), box = document.getElementById('ancestor-list');
+  if (q) {
+    /* Each result names the case, shows where the words were found, and opens the case at that step. */
+    const hits = searchHits(q);
+    /* Matches of the same kind share one line (e.g. "SNP: R-FT1, R-FT2"), one kind per line. */
+    const lines = w => { const g = []; w.forEach(x => { const i = x.label.indexOf(': '), k = i > 0 ? x.label.slice(0, i) : x.label, v = i > 0 ? x.label.slice(i + 2) : ''; const e = g.find(y => y.k === k); if (e) { if (v) e.v.push(v); } else g.push({ k, v: v ? [v] : [] }); }); return g.map(y => y.v.length ? `${y.k}: ${y.v.join(', ')}` : y.k); };
+    box.innerHTML = hits.length ? hits.map(h => `<div class="anc-item search-hit" data-act="open-${h.kind}" data-id="${h.id}" data-tab="${h.w[0].tab}">
+      <div class="sh-top"><span class="dot"></span><span class="anc-name">${esc(h.name)}</span><span class="anc-years">${esc(h.side)}</span></div>
+      <div class="sh-where">${lines(h.w).slice(0, 3).map(x => `<div>${esc(x)}</div>`).join('')}</div></div>`).join('') : '<div class="side-empty">No matches.</div>';
+  } else {
+    const list = realAncestors().sort((x, y) => (x.name || '').localeCompare(y.name || ''));
+    box.innerHTML = list.length ? list.map(a => {
+      const v = verdict(a);
+      return `<div class="anc-item${view.page === 'ancestor' && view.id === a.id ? ' active' : ''}" data-act="open-ancestor" data-id="${a.id}">
       <span class="dot ${v.c === 'green' ? 'green' : v.c === 'red' ? 'red' : ''}"></span>
       <span class="anc-name">${esc(a.name || 'Unnamed ancestor')}</span>
       <span class="anc-years">${esc(lifeYears(a))}</span></div>`;
-  }).join('') : `<div class="side-empty">${q ? 'No matches.' : 'No ancestors yet.'}</div>`;
+    }).join('') : '<div class="side-empty">No ancestors yet.</div>';
+  }
   document.querySelectorAll('.side-nav a').forEach(el => el.classList.toggle('active', el.dataset.page === view.page || (view.page === 'project' && el.dataset.page === 'projects')));
 }
 
@@ -395,6 +437,52 @@ function render() {
   renderSidebar();
 }
 
+/* ----- Start here: two questions point a beginner to the right path, list what to gather, and start the first case ----- */
+let startAns = {};
+const START_PATHS = {
+  snp: { title: 'Your path: SNP-first', why: 'Big Y-700 results show each tester\'s SNPs, which map the testers\' tree and show where their lines meet.',
+    gather: ['Each tester\'s FamilyTreeDNA results, or the details he shares with you.', 'Each tester\'s SNP path: look up his terminal SNP in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open Ancestral Path.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.', 'Optional: the Genetic Distance between testers from the Y-DNA Matches page, to compare their STR markers too.'] },
+  str: { title: 'Your path: STR-first', why: 'Y-37, Y-67 and Y-111 results show how closely testers match on their markers (the Genetic Distance), which estimates how many generations back they connect.',
+    gather: ['Each tester\'s Y-DNA Matches list from FamilyTreeDNA: who matches, the Genetic Distance (GD) and how many markers were compared.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.', 'Optional: the marker values that differ between two testers, from the Y-STR results page, for a more exact estimate.'] },
+  non: { title: 'Your path: Non-Tester Research', why: 'Without a Y-DNA test, you can still compare your documented line with the lineage groupings of a surname project and narrow down where it fits.',
+    gather: ['Your documented line back to its earliest known ancestor, with the places the family lived.', 'The surname\'s Y-DNA project on FamilyTreeDNA and its Y-DNA Results page, which lists the project\'s groupings.', 'Optional: contact details for the project administrators, who can answer questions about the groupings.'] }
+};
+function startHereHTML() {
+  const t = startAns.tested, k = startAns.test, key = t === 'N' ? 'non' : t === 'Y' && k ? k : null, P = key && START_PATHS[key];
+  const sel = (name, opts) => `<select data-start="${name}"><option value="">— choose —</option>${opts.map(o => `<option value="${o[0]}"${startAns[name] === o[0] ? ' selected' : ''}>${o[1]}</option>`).join('')}</select>`;
+  return `<div class="card">
+    <h3>Start here</h3>
+    <p class="hint">New to Y-DNA research? Answer two questions and the app will show you where to begin and what to gather first. Not sure yet? <a href="#" data-act="load-example">Look at a finished example</a> first.</p>
+    <div class="grid2">
+      <div class="field"><label>1. Have you, or a male relative on the line you are researching, taken a Y-DNA test?</label>${sel('tested', [['Y', 'Yes'], ['N', 'No, not yet']])}</div>
+      ${t === 'Y' ? `<div class="field"><label>2. Which test?</label>${sel('test', [['snp', 'Big Y-700'], ['str', 'Y-37, Y-67 or Y-111']])}</div>` : ''}
+    </div>
+    ${P ? `<div class="verdict" style="margin-top:14px;display:block"><b>${P.title}</b><div class="hint" style="margin:4px 0 10px">${P.why}</div>
+      <b>Gather these first:</b><ul style="margin:6px 0 12px 18px">${P.gather.map(x => `<li>${x}</li>`).join('')}</ul>
+      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example">Look at a finished example</button></div></div>` : ''}
+  </div>`;
+}
+/* A finished example case for a made-up family, so a beginner can see what good entries look like at every step. */
+function loadExample() {
+  let a = S.ancestors.find(x => x.example);
+  if (!a) {
+    const t = (id, label, birth, path, line, location) => ({ id, label, birth, generations: '10', test: 'Big Y-700', path, line, location });
+    a = fixAncestor({ id: uid(), example: true, name: 'William Hartwell (example)', birth: '1580', death: '1642', place: 'Kent, England', method: 'SNP', inquiry: 'right',
+      notes: 'John, Samuel and Peter Hartwell all believe they descend from William Hartwell of Kent.', ftdnaDate: '1450',
+      testers: [t('ex1', 'John Hartwell', '1924', 'R-FT12345, R-Y98765', 'Thomas Hartwell (1702–1770)', 'Kent, England'),
+        t('ex2', 'Samuel Hartwell', '1955', 'R-FT54321, R-Y98765', 'Richard Hartwell (1698–1761)', 'Virginia'),
+        t('ex3', 'Peter Hartwell', '1950', 'R-FT54321, R-Y98765', 'Richard Hartwell (1698–1761)', 'Maryland')],
+      gdPairs: [{ id: uid(), a: 'ex1', b: 'ex2', markers: '111', gd: '3' }, { id: uid(), a: 'ex2', b: 'ex3', markers: '111', gd: '1' }],
+      documents: [
+        { id: uid(), type: 'Baptism', date: '1580', place: 'Ashford, Kent', source: 'Ashford parish register', notes: 'Baptism of William, son of Robert Hartwell', supports: 'Y' },
+        { id: uid(), type: 'Probate / Will', date: '1642', place: 'Ashford, Kent', source: 'Will of William Hartwell, Kent archives', notes: 'Names his sons Thomas and Richard', supports: 'Y' },
+        { id: uid(), type: 'Land / Deed', date: '1735', place: 'Virginia', source: 'County deed book', notes: 'Richard Hartwell, late of Kent, buys land', supports: 'Y' }] });
+    S.ancestors.push(a);
+    saveData();
+  }
+  view = { page: 'ancestor', id: a.id, tab: 'testers' };
+  render(); window.scrollTo(0, 0);
+}
 function renderHome() {
   const steps = [
     ['Record documents', 'Birth, marriage, census, probate, land, military and church records.'],
@@ -406,7 +494,7 @@ function renderHome() {
     ['Resolve conflicts', 'Reassess the evidence where it does not align.'],
     ['Report', 'A printable summary of the case.']
   ];
-  const cards = S.ancestors.map(a => {
+  const cards = realAncestors().map(a => {
     const v = verdict(a);
     return `<div class="anc-card" data-act="open-ancestor" data-id="${a.id}">
       <h3>${esc(a.name || 'Unnamed ancestor')}</h3>
@@ -416,11 +504,11 @@ function renderHome() {
   <div class="hero">
     <h1>Welcome to Convergence</h1>
     <p>Reconstruct patrilineal lineages by testing whether SNP data, STR markers and traditional genealogy converge. Each ancestor is a research case with its own workspace.</p>
-    <button class="btn" data-act="add-ancestor" style="background:var(--bronze)">+ Create an ancestor</button>
   </div>
+  ${startHereHTML()}
   <div class="card"><h3>The research workflow</h3><div class="steps">${steps.map(s => `<div class="step"><b>${s[0]}</b>${s[1]}</div>`).join('')}</div></div>
   <h2>Your ancestors</h2>
-  ${S.ancestors.length ? `<div class="anc-cards">${cards}</div>` : '<p class="muted">No ancestors yet. Create your first ancestor to start a research case.</p>'}`;
+  ${realAncestors().length ? `<div class="anc-cards">${cards}</div>` : '<p class="muted">No ancestors yet. Use Start here above, or the + beside Ancestors in the menu.</p>'}`;
 }
 
 function renderAncestor(a) {
@@ -443,7 +531,7 @@ function renderAncestor(a) {
       <div class="anc-meta">${esc(lifeYears(a))}${a.place ? ' · ' + esc(a.place) : ''}</div></div>
     <div class="mini-lights">${st.map(s => `<span><i class="dot ${s[1].c}"></i>${s[0]}</span>`).join('')}</div>
   </div>
-  ${guide}${body(a)}${nav}`;
+  ${a.example ? '<div class="verdict amber no-print" style="display:block;margin-bottom:14px"><b>This is an example with made-up data.</b> <span class="hint">Click Back and Continue to see what a finished case looks like at every step. When you are done, delete it on the Overview step: Goal → More options → Delete this ancestor.</span></div>' : ''}${guide}${body(a)}${nav}`;
 }
 /* Report charts drawn to match the calculators' charts (same colours, rounded boxes, label and key), built as tables with
    inline styles so they look the same on screen, in print and in the Word download. */
@@ -796,7 +884,7 @@ function lineageTree(a) {
     if (isT && noOwn) return `<li>${snp}<ul><li><span class="anc-node">${esc(a.name || 'Ancestor')}</span>${tags(c)}${c.children.size ? draw(c) : ''}</li></ul></li>`;
     return `<li><div class="ut-row">${snp}<input class="ut-year" type="number" data-snpdate="${esc(normSNP(c.name))}" value="${esc(snpYear(c.name, a) == null ? '' : snpYear(c.name, a))}" placeholder="Year formed"><input class="ut-assign" data-snpassign="${esc(normSNP(c.name))}" list="anc-list" value="${esc(snpAssigned(c.name))}" placeholder="Assign an ancestor" autocomplete="off">${tags(c)}</div>${c.children.size ? draw(c) : ''}</li>`;
   }).join('')}</ul>`;
-  return `<div class="tree utree">${draw(root)}</div><datalist id="anc-list">${S.ancestors.map(x => `<option value="${esc(ancLabel(x))}">`).join('')}</datalist><p class="hint" style="margin-top:8px">Oldest SNP at the top. The highlighted SNP is where the testers' lines meet. Beside each SNP, enter the year it formed (from FamilyTreeDNA Discover); it shows on the generation charts. Type or choose the ancestor in whom each SNP formed, if you know him; the same SNP shows the same ancestor in every case and on the SNP Tree page.</p>`;
+  return `<div class="tree utree">${draw(root)}</div><datalist id="anc-list">${realAncestors().map(x => `<option value="${esc(ancLabel(x))}">`).join('')}</datalist><p class="hint" style="margin-top:8px">Oldest SNP at the top. The highlighted SNP is where the testers' lines meet. Beside each SNP, enter the year it formed (from FamilyTreeDNA Discover); it shows on the generation charts. Type or choose the ancestor in whom each SNP formed, if you know him; the same SNP shows the same ancestor in every case and on the SNP Tree page.</p>`;
 }
 /* SNP Analysis when the ancestor has no SNP of his own: where he sits between SNPs, and what each tester carries. */
 function tabSNPNoOwn(a) {
@@ -848,13 +936,13 @@ function snpYear(snp, a) {
   return num(S.snpDates && S.snpDates[k]);
 }
 /* An SNP's ancestor comes from either the shared SNP of an ancestor's case, or the ancestor typed or chosen beside the SNP on the tree. */
-function snpOwners(snp) { const k = normSNP(snp), m = S.snpAssign && S.snpAssign[k]; return S.ancestors.filter(x => (snpUsed(x) && targetSNP(x) && normSNP(targetSNP(x)) === k) || (m && m.id === x.id)); }
+function snpOwners(snp) { const k = normSNP(snp), m = S.snpAssign && S.snpAssign[k]; return realAncestors().filter(x => (snpUsed(x) && targetSNP(x) && normSNP(targetSNP(x)) === k) || (m && m.id === x.id)); }
 function snpAssigned(snp) { const m = S.snpAssign && S.snpAssign[normSNP(snp)], names = snpOwners(snp).map(ancLabel); if (m && m.name && !m.id && !names.includes(m.name)) names.unshift(m.name); return names.join(', '); }
 let treePick = '';
 function renderSnpTree() {
   const root = { children: new Map() };
   let count = 0;
-  S.ancestors.forEach(anc => anc.testers.forEach(t => {
+  realAncestors().forEach(anc => anc.testers.forEach(t => {
     const p = pathOf(t).slice().reverse();
     if (!p.length) return;
     count++;
@@ -1882,6 +1970,11 @@ document.addEventListener('change', e => {
     const text = el.value.trim(), x = S.ancestors.find(y => ancLabel(y) === text || (y.name || '') === text);
     if (!text) delete S.snpAssign[d.snpassign];
     else S.snpAssign[d.snpassign] = x ? { id: x.id, name: ancLabel(x) } : { name: text };
+  } else if (d.start) {
+    startAns[d.start] = el.value;
+    if (d.start === 'tested' && el.value !== 'Y') delete startAns.test;
+    render();
+    return;
   } else if (el.id === 'rep-pick') {
     view.id = reportPick = el.value; render();
     return;
@@ -1912,7 +2005,7 @@ document.addEventListener('click', e => {
   const app = document.querySelector('.app');
   switch (act) {
     case 'nav': view = { page: el.dataset.page, id: null, tab: 'overview' }; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
-    case 'open-ancestor': view = { page: 'ancestor', id: el.dataset.id, tab: 'checklist' }; reportPick = el.dataset.id; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
+    case 'open-ancestor': view = { page: 'ancestor', id: el.dataset.id, tab: el.dataset.tab || 'checklist' }; reportPick = el.dataset.id; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
     case 'add-ancestor': {
       const anc = fixAncestor({ id: uid(), name: 'New ancestor' });
       S.ancestors.push(anc); saveData();
@@ -1927,7 +2020,7 @@ document.addEventListener('click', e => {
         view = { page: 'home', id: null, tab: 'overview' }; render();
       }
       break;
-    case 'open-project': view = { page: 'project', id: el.dataset.id, tab: 'checklist' }; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
+    case 'open-project': view = { page: 'project', id: el.dataset.id, tab: el.dataset.tab || 'checklist' }; app.classList.remove('menu-open'); render(); window.scrollTo(0, 0); break;
     case 'add-project': {
       const p = fixProject({ id: uid(), name: 'New non-tester research' });
       S.projects.push(p); saveData();
@@ -1943,6 +2036,19 @@ document.addEventListener('click', e => {
       }
       break;
     case 'pick-calc': pickCalc(view.page, el.dataset.id); break;
+    case 'load-example': e.preventDefault(); loadExample(); break;
+    case 'start-case': {
+      const anc = fixAncestor({ id: uid(), name: 'New ancestor', method: el.dataset.m || '' });
+      S.ancestors.push(anc); saveData();
+      view = { page: 'ancestor', id: anc.id, tab: 'checklist' }; render(); window.scrollTo(0, 0);
+      break;
+    }
+    case 'start-project': {
+      const p = fixProject({ id: uid(), name: 'New non-tester research' });
+      S.projects.push(p); saveData();
+      view = { page: 'project', id: p.id, tab: 'checklist' }; render(); window.scrollTo(0, 0);
+      break;
+    }
     case 'aio-clear': if (confirm('Clear everything in the All-in-One?')) { S.aio = fixAncestor({}); saveData(); render(); } break;
     case 'use-cal': if (a) { a.rateCal = el.dataset.v; saveData(); render(); } break;
     case 'use-interp': {
