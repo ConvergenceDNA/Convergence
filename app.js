@@ -33,7 +33,7 @@ function normalizeData(d) {
   return d;
 }
 function fixAncestor(a) {
-  ['documents', 'testers', 'gdPairs', 'conflicts', 'extraEvidence'].forEach(k => {
+  ['documents', 'testers', 'gdPairs', 'conflicts', 'extraEvidence', 'socGens'].forEach(k => {
     if (!Array.isArray(a[k])) a[k] = [];
   });
   if (!a.conv || typeof a.conv !== 'object') a.conv = {};
@@ -356,7 +356,7 @@ function renderSidebar() {
 /* ---------- Render: main ---------- */
 const TABS = [
   ['checklist', 'Pre-Research'], ['overview', 'Overview'], ['testers', 'Testers & DNA'], ['str', 'STR Analysis'], ['documents', 'Documents'],
-  ['snp', 'SNP Analysis'], ['convergence', 'Convergence'], ['report', 'Report']
+  ['snp', 'SNP Analysis'], ['convergence', 'Convergence'], ['society', 'Lineage Society'], ['report', 'Report']
 ];
 /* Research method: STR-first (default) or SNP-first. The two swap the places of STR Analysis and SNP Analysis. */
 const METHODS = [
@@ -432,7 +432,7 @@ function renderAncestor(a) {
   const nav = view.tab === 'overview' ? '' : `<div class="wiz-nav no-print">${prev ? `<button class="btn ghost" data-act="tab" data-tab="${prev[0]}">← Back</button>` : '<span></span>'}${next ? `<button class="btn" data-act="tab" data-tab="${next[0]}">Continue to ${esc(next[1])} →</button>` : ''}</div>`;
   const body = {
     checklist: tabChecklist, overview: tabOverview, documents: tabDocuments, testers: tabTesters, snp: tabSNP,
-    str: tabSTR, alignment: tabAlignment, convergence: tabConvergence, report: tabReport
+    str: tabSTR, alignment: tabAlignment, convergence: tabConvergence, society: tabSociety, report: tabReport
   }[view.tab] || tabOverview;
   return `
   <div class="anc-header">
@@ -496,6 +496,7 @@ function guideFor(a, tab) {
     alignment: { q: 'Does each tester\'s family tree match the DNA?', help: 'For each tester, compare his documented line with what the DNA shows. Enter his earliest documented ancestor and where the family lived. Choose <b>Yes</b> if the paper trail and the DNA agree, <b>No</b> if they do not, and note any gaps or conflicts, such as a missing generation or a possible non-paternal event (NPE).' },
     snp: { q: 'Map the testers\' SNP tree', help: 'Every Big Y-700 tester has an SNP path: his newest SNP first, then older SNPs he shares with other men. The tree below draws all the testers\' paths together, oldest SNP at the top, so you can see where their lines branch apart and where they meet. Type or choose the ancestor in whom each SNP formed, if you know him. Then enter the FTDNA date of the SNP where the lines meet, and the app checks it against the generations.' },
     convergence: { q: 'Does the evidence agree?', help: 'Here the STR, genealogy and SNP evidence are weighed together. The chart shows how much of it supports the lineage and how much contradicts it. Review each line of evidence, change it if you know better, and record any conflict with its likely cause and how you plan to resolve it.' },
+    society: { q: 'Proving the line to a lineage society', help: 'If you are applying to a lineage society (such as the DAR, SAR or the Mayflower Society), set out the proof one generation at a time, from the applicant up to the qualifying ancestor. For each generation give the birth, marriage and death with their sources, and the record that proves he or she was the child of the next generation. Where the records cannot prove a link, the DNA evidence from this case can support it. Each society sets its own rules for DNA, so check its current policy. If you are not applying to a society, click Continue.' },
     report: { q: 'Your research report', help: 'This is the summary of the case, in the order you worked. Download it as a Word document or print it. Conclusions stay provisional: new records or test results can change them.' }
   };
   /* SNP-first: the step's advice also says what to look for, for the question the user chose. */
@@ -1108,6 +1109,64 @@ function tabConvergence(a) {
 function simpleTable(head, rows) {
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('') : `<tr><td class="empty" colspan="${head.length}">None recorded.</td></tr>`}</tbody></table></div>`;
 }
+/* ----- Lineage Society: proof of the line one generation at a time, with DNA support where the records fall short ----- */
+const SOC_STATUS = ['Missing', 'Partly proven', 'Proven'];
+function societyReadiness(a) {
+  const g = a.socGens;
+  if (!g.length) return { c: '', label: 'Not started', msg: 'Add each generation, from the applicant up to the qualifying ancestor.' };
+  const gap = g.map((r, i) => ({ r, n: i + 1 })).filter(x => x.r.status !== 'Proven');
+  const dnaOnly = gap.filter(x => x.r.status === 'Partly proven' && x.r.dna === 'Yes');
+  if (!gap.length) return { c: 'green', label: 'Ready to submit', msg: `All ${g.length} generations are proven.` };
+  if (gap.length === dnaOnly.length) return { c: 'amber', label: 'Ready if DNA is accepted', msg: `Generation${dnaOnly.length === 1 ? '' : 's'} ${dnaOnly.map(x => x.n).join(', ')} rely on DNA support. Check that the society accepts DNA for ${dnaOnly.length === 1 ? 'this link' : 'these links'}.` };
+  return { c: 'red', label: 'Proof still needed', msg: `Still to prove: ${gap.filter(x => !dnaOnly.includes(x)).map(x => `generation ${x.n}${x.r.name ? ' (' + esc(x.r.name) + ')' : ''}`).join(', ')}.` };
+}
+function societyDNA(a) {
+  /* The DNA evidence from this case that can support a link: the shared SNP and the GD comparisons. */
+  const tgt = targetSNP(a), yr = num(a.ftdnaDate), out = [];
+  if (snpUsed(a) && tgt) out.push(`Shared SNP <b>${esc(tgt)}</b>${yr != null ? ` (formed c. ${yr})` : ''}, carried by ${a.testers.filter(t => pathOf(t).some(x => normSNP(x) === normSNP(tgt))).map(t => esc(testerLabel(t))).join(', ') || 'the testers'}.`);
+  a.gdPairs.forEach(p => { const e = pairEval(a, p), q = e.ta && e.tb ? pairGens(a, e) : null; if (q) out.push(`${esc(testerLabel(e.ta))} and ${esc(testerLabel(e.tb))}: GD ${e.gd} on ${e.markers} markers, about ${q.mid} generations (${q.lo}–${q.hi}).`); });
+  return out;
+}
+function tabSociety(a) {
+  const st = societyReadiness(a), dna = societyDNA(a), yn = v => v === 'Yes' ? 'Yes' : '—';
+  const genLabel = r => `${a.socGens.indexOf(r) + 1}${a.socGens.indexOf(r) === 0 ? ' <span class="muted">(applicant)</span>' : ''}`;
+  return `<div class="card">
+    <h3>The society</h3>
+    <div class="grid3">${field('Lineage society', 'socName', a.socName, { ph: 'e.g. Sons of the American Revolution' })}${field('Qualifying ancestor', 'socQualifying', a.socQualifying, { ph: a.name || 'e.g. William Hartwell' })}${field('Member, ancestor or application numbers', 'socNumber', a.socNumber, { ph: 'e.g. Ancestor # A012345' })}</div>
+  </div>
+  <div class="card">
+    <div class="card-head"><h3>Proof, one generation at a time</h3>${pill(st.c, st.label)}</div>
+    <p class="hint">Generation 1 is the applicant; the last generation is the qualifying ancestor. For each one, give the date, place and source of each event, and the record that proves this person was the child of the next generation.</p>
+    ${editTable('socGens', [
+      { k: 'g', label: 'Generation', type: 'calc', render: genLabel },
+      { k: 'name', label: 'Name', w: 160, ph: 'e.g. John Hartwell' },
+      { k: 'spouse', label: 'Spouse', w: 150 },
+      { k: 'birth', label: 'Birth (date, place, source)', type: 'textarea', w: 200, ph: 'e.g. 4 May 1802, Kent Co., Md.; baptism register' },
+      { k: 'marriage', label: 'Marriage (date, place, source)', type: 'textarea', w: 200 },
+      { k: 'death', label: 'Death (date, place, source)', type: 'textarea', w: 200 },
+      { k: 'parentage', label: 'Proof of parentage', type: 'textarea', w: 220, ph: 'e.g. Father\'s will, 1840, names him as son' },
+      { k: 'status', label: 'Status', type: 'select', opts: SOC_STATUS },
+      { k: 'dna', label: 'DNA support?', type: 'select', opts: [{ v: '', l: 'No' }, { v: 'Yes', l: 'Yes' }] }
+    ], a.socGens, { addLabel: 'Add generation', empty: 'No generations yet.' })}
+    <p class="hint" style="margin-top:8px">${st.msg}</p>
+  </div>
+  <div class="card">
+    <h3>DNA support</h3>
+    <p class="hint">Where the records cannot fully prove a link, Y-DNA can support it. Many societies accept it only when a tester matches a descendant whose line the society has already verified, and only alongside the paper proof. Each society sets its own rules, so check its current DNA policy before relying on it.</p>
+    ${dna.length ? `<ul class="hint" style="margin:6px 0 12px 18px">${dna.map(x => `<li>${x}</li>`).join('')}</ul>` : '<p class="muted">No DNA evidence in this case yet. Add testers and comparisons on the earlier steps.</p>'}
+    <div class="grid2">${field('Previously verified line', 'socVerified', a.socVerified, { type: 'textarea', ph: 'e.g. Matches a descendant of member # 123456, whose line the society verified in 1998' })}${field('Generations the DNA supports', 'socDnaNote', a.socDnaNote, { type: 'textarea', ph: 'e.g. Links generation 4 to generation 5, where no will survives' })}</div>
+  </div>
+  <div class="card report">
+    <div class="card-head no-print"><span class="hint">An application worksheet, laid out generation by generation.</span><div class="tbl-actions" style="margin:0"><button class="btn small ghost" data-act="download-society">Download (Word)</button><button class="btn small" data-act="print">Print</button></div></div>
+    <h1>${esc(a.socName || 'Lineage society')} application worksheet</h1>
+    <p class="muted">Qualifying ancestor: <b>${esc(a.socQualifying || a.name || '—')}</b>${a.socNumber ? ' · ' + esc(a.socNumber) : ''}</p>
+    <p><b>Status:</b> ${pill(st.c, st.label)} <span class="muted">${st.msg}</span></p>
+    <h2>Lineage</h2>
+    ${simpleTable(['Gen.', 'Name and spouse', 'Birth', 'Marriage', 'Death', 'Proof of parentage', 'Status', 'DNA'], a.socGens.map((r, i) => [String(i + 1), `${esc(r.name)}${r.spouse ? '<br><span class="muted">m. ' + esc(r.spouse) + '</span>' : ''}`, esc(r.birth), esc(r.marriage), esc(r.death), esc(r.parentage), esc(r.status), yn(r.dna)]))}
+    ${dna.length || a.socVerified || a.socDnaNote ? `<h2>DNA support</h2>${dna.length ? `<ul>${dna.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}${a.socVerified ? `<p><b>Previously verified line:</b> ${esc(a.socVerified)}</p>` : ''}${a.socDnaNote ? `<p><b>Generations supported:</b> ${esc(a.socDnaNote)}</p>` : ''}` : ''}
+    <p class="hint" style="margin-top:14px">DNA supports the documentary proof; it does not replace it. Check the society's current requirements before submitting.</p>
+  </div>`;
+}
 function tabReport(a) {
   const v = verdict(a), tgt = targetSNP(a), shared = sharedSNP(a.testers);
   const rows = a.testers.map(t => genRow(a, t));
@@ -1668,7 +1727,7 @@ async function chartToPNG(svg) {
   c.getContext('2d').drawImage(img, 0, 0, 360, 360);
   return c.toDataURL('image/png');
 }
-async function downloadReport(a) {
+async function downloadReport(a, kind = 'report') {
   const el = document.querySelector('.report');
   if (!el) return;
   const copy = el.cloneNode(true);
@@ -1684,7 +1743,7 @@ async function downloadReport(a) {
   const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `${(a.name || 'Convergence report').replace(/[\\/:*?"<>|]+/g, '').trim() || 'Convergence report'} - report.doc`;
+  link.download = `${(a.name || 'Convergence report').replace(/[\\/:*?"<>|]+/g, '').trim() || 'Convergence report'} - ${kind}.doc`;
   document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
@@ -1733,6 +1792,7 @@ function newRow(coll) {
   if (coll === 'documents') r.type = DOC_TYPES[0];
   if (coll === 'testers') { r.label = 'Tester ' + String.fromCharCode(65 + (rec().testers.length % 26)); r.test = testTypes(rec())[0]; }
   if (coll === 'conflicts') { r.type = CONFLICT_TYPES[0]; r.status = 'Open'; }
+  if (coll === 'socGens') r.status = 'Missing';
   if (coll === 'limits') { r.type = LIMIT_TYPES[0]; }
   return r;
 }
@@ -1902,6 +1962,7 @@ document.addEventListener('click', e => {
       break;
     case 'print': window.print(); break;
     case 'download-report': if (a) downloadReport(a); break;
+    case 'download-society': if (a) downloadReport(a, 'society application'); break;
     case 'export': exportData(); break;
     case 'import': document.getElementById('import-file').click(); break;
     case 'open-menu': app.classList.add('menu-open'); break;
