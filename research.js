@@ -70,9 +70,25 @@ function renderProjects() {
   ${list.length ? `<div class="anc-cards">${cards}</div>` : '<p class="muted">No non-tester research yet.</p>'}`;
 }
 
+/* One step per screen, like an ancestor's workspace: what to do at each step, then Back / Continue. */
+function projectGuide(tab) {
+  return {
+    checklist: { q: 'Before you start', help: 'Work through this checklist before you compare anything. It makes sure the research is workable: you know which line you are placing, how far back your records go, and which surname project to use. Tick each item as you go; you can come back to it at any time.' },
+    groups: { q: 'Which surname project and groupings?', help: 'Give your research a name and the surname. Find the surname\'s Y-DNA project on FamilyTreeDNA and open its Y-DNA Results page. Enter each lineage grouping the project lists, with its defining SNP, where it comes from and its earliest known ancestor. Each grouping is a separate paternal branch.' },
+    geo: { q: 'Does your line fit each grouping\'s geography?', help: 'Enter your earliest documented ancestor and where the family lived. Then, for each grouping, note its region and choose <b>Yes</b> if your family\'s locations fall within it or <b>No</b> if they do not. Judge the overall pattern, not a single place.' },
+    snpseg: { q: 'What SNPs define each grouping?', help: 'For each grouping, record the SNP above its defining SNP (upstream) and the SNPs below it (downstream), from the project page or FamilyTreeDNA Discover. Choose <b>Yes</b> if the testers in the grouping share a consistent SNP structure. A grouping with no SNP support (surname only) is weaker evidence.' },
+    elim: { q: 'Which groupings can you rule out?', help: 'Go through each grouping and choose <b>Yes</b> under Eliminated if it conflicts with your documented genealogy: names, places or known family connections that cannot fit. Give the reason. Choose <b>No</b> for groupings that still fit.' },
+    narrow: { q: 'Which grouping fits best?', help: 'Only the groupings you did not eliminate are shown. For each one, rate how well the SNP, geographic and genealogical evidence supports your line, and note any conflicts. If one grouping remains, your line most likely belongs to it.' },
+    limits: { q: 'What limits your conclusion?', help: 'Record anything that could weaken the result: a project that does not cover every line, no direct Y-DNA test, thin records, groupings that overlap, or groupings based on surname only. Not finding your line does not mean it does not exist; it may not be represented yet.' },
+    report: { q: 'Your research report', help: 'This is the summary of your research, in the order you worked. Print it or save it as a PDF. A narrowed lineage is not a confirmed one: a Y-DNA test of a male-line descendant can confirm the placement.' }
+  }[tab] || null;
+}
 function renderProject(p) {
   const o = projectOutcome(p);
-  const tabs = PTABS.map((t, i) => `<button class="tab${view.tab === t[0] ? ' active' : ''}" data-act="tab" data-tab="${t[0]}"><span class="num">${i + 1}</span>${t[1]}</button>`).join('');
+  const idx = Math.max(0, PTABS.findIndex(t => t[0] === view.tab)), prev = PTABS[idx - 1], next = PTABS[idx + 1], g = projectGuide(PTABS[idx][0]);
+  if (view.tab !== PTABS[idx][0]) view.tab = PTABS[idx][0];
+  const guide = g ? `<div class="wiz-head"><div class="wiz-step">Step ${idx + 1} of ${PTABS.length} · ${esc(PTABS[idx][1])}</div><h2 class="wiz-q">${g.q}</h2><div class="wiz-help"><b>What to do:</b> ${g.help}</div></div>` : '';
+  const nav = `<div class="wiz-nav no-print">${prev ? `<button class="btn ghost" data-act="tab" data-tab="${prev[0]}">← Back</button>` : '<span></span>'}${next ? `<button class="btn" data-act="tab" data-tab="${next[0]}">Continue to ${esc(next[1])} →</button>` : ''}</div>`;
   const body = {
     checklist: () => checklistHTML('nontester', p), groups: ptGroups, geo: ptGeo, snpseg: ptSnpSeg,
     elim: ptElim, narrow: ptNarrow, limits: ptLimits, report: ptReport
@@ -83,8 +99,7 @@ function renderProject(p) {
       <div class="anc-meta">${esc(p.surname || 'No surname set')}${p.projectName ? ' · ' + esc(p.projectName) : ''}</div></div>
     <div>${pill(o.c === 'grey' ? '' : o.c, o.title)}</div>
   </div>
-  <div class="tabs">${tabs}</div>
-  ${body(p)}`;
+  ${guide}${body(p)}${nav}`;
 }
 
 function outcomeBox(p) {
@@ -200,7 +215,7 @@ function ptReport(p) {
   const today = new Date().toLocaleDateString();
   const yn = v => v === 'Y' ? 'Yes' : v === 'N' ? 'No' : '—';
   return `<div class="card report">
-    <div class="card-head no-print"><span class="hint">A printable summary of this non-tester research.</span><button class="btn small" data-act="print">Print / Save as PDF</button></div>
+    <div class="card-head no-print"><span class="hint">A printable summary of this non-tester research.</span><div class="tbl-actions" style="margin:0"><button class="btn small ghost" data-act="download-report">Download (Word)</button><button class="btn small" data-act="print">Print</button></div></div>
     <h1>${esc(p.name || 'Unnamed research')}</h1>
     <p class="muted">${esc(p.surname || '')}${p.projectName ? ' · ' + esc(p.projectName) : ''} · Report generated ${esc(today)}</p>
     <p>Earliest documented ancestor: <b>${esc(p.earliest || '—')}</b> · Primary location(s): <b>${esc(p.locations || '—')}</b></p>
