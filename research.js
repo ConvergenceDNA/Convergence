@@ -74,7 +74,7 @@ function renderProjects() {
 function projectGuide(tab) {
   return {
     checklist: { q: 'Before you start', help: 'Work through this checklist before you compare anything. It makes sure the research is workable: you know which line you are placing, how far back your records go, and which surname project to use. Tick each item as you go; you can come back to it at any time.' },
-    groups: { q: 'Which surname project and groupings?', help: 'Give your research a name and the surname. Find the surname\'s Y-DNA project on FamilyTreeDNA and open its Y-DNA Results page. Enter each lineage grouping the project lists, with its defining SNP, where it comes from and its earliest known ancestor. Each grouping is a separate paternal branch.' },
+    groups: { q: 'Which surname project and groupings?', help: 'Choose the question you want to answer. Then give your research a name and the surname. Find the surname\'s Y-DNA project on FamilyTreeDNA and open its Y-DNA Results page. Enter each lineage grouping the project lists, with its defining SNP, where it comes from and its earliest known ancestor. Each grouping is a separate paternal branch.' },
     geo: { q: 'Does your line fit each grouping\'s geography?', help: 'Enter your earliest documented ancestor and where the family lived. Then, for each grouping, note its region and choose <b>Yes</b> if your family\'s locations fall within it or <b>No</b> if they do not. Judge the overall pattern, not a single place.' },
     snpseg: { q: 'What SNPs define each grouping?', help: 'For each grouping, record the SNP above its defining SNP (upstream) and the SNPs below it (downstream), from the project page or FamilyTreeDNA Discover. Choose <b>Yes</b> if the testers in the grouping share a consistent SNP structure. A grouping with no SNP support (surname only) is weaker evidence.' },
     elim: { q: 'Which groupings can you rule out?', help: 'Go through each grouping and choose <b>Yes</b> under Eliminated if it conflicts with your documented genealogy: names, places or known family connections that cannot fit. Give the reason. Choose <b>No</b> for groupings that still fit.' },
@@ -102,13 +102,78 @@ function renderProject(p) {
   ${guide}${body(p)}${nav}`;
 }
 
+/* The question the non-tester research sets out to answer, and whether the evidence so far answers it. */
+const P_INQUIRIES = [
+  { v: 'p-place', q: 'Which project grouping does my line belong to?',
+    needs: 'Your documented line back to its earliest ancestor, and a surname project with lineage groupings.',
+    focus: 'Rule out the groupings that conflict with your records on the Elimination step. The grouping left standing is where your line most likely belongs.',
+    answer: 'e.g. "Narrowed to Group 3, the Hartwells of Kent."' },
+  { v: 'p-one', q: 'Is my family part of one particular grouping?',
+    needs: 'A grouping that a cousin, a family story or a record points to, plus your documented line.',
+    focus: 'Choose that grouping in the Which grouping? box, then test it against your records on the Elimination step. Check the other groupings too, so the answer is not decided by default.',
+    answer: 'e.g. "Yes, Group 3 is the only grouping that fits."' },
+  { v: 'p-rep', q: 'Is my line represented in the project at all?',
+    needs: 'The project\'s full list of groupings, and your documented line.',
+    focus: 'Go through every grouping on the Elimination step. If none fits, your line may not have a tester yet; record why on the Limitations step.',
+    answer: 'e.g. "Not yet: every grouping conflicts with the records."' },
+  { v: 'p-test', q: 'Who should take a Y-DNA test to confirm it?',
+    needs: 'A narrowed placement, and a living man descended father-to-son from your earliest documented ancestor.',
+    focus: 'Narrow the groupings first. Then a Y-DNA test of a direct male-line descendant shows whether he shares the remaining grouping\'s defining SNP.',
+    answer: 'e.g. "Test a direct male-line descendant of William Hartwell; a match to Group 3 confirms it."' }
+];
+function pInquiryOf(p) { return P_INQUIRIES.find(x => x.v === p.inquiry) || null; }
+function pInquiryStatus(p) {
+  const inq = pInquiryOf(p);
+  if (!inq) return null;
+  const need = m => ({ c: 'amber', label: 'Not answered yet', msg: m }), done = m => ({ c: 'green', label: 'Answered', msg: m });
+  const lead = m => ({ c: 'amber', label: 'Lead found', msg: m }), no = m => ({ c: 'red', label: 'Answered: no', msg: m });
+  const g = p.groups, left = g.filter(x => x.eliminated !== 'Y'), open = g.filter(x => x.eliminated !== 'Y' && x.eliminated !== 'N');
+  const names = list => list.map(x => esc(groupName(x))).join(', ');
+  if (!g.length) return need('Add the project\'s groupings on the Project & Groupings step.');
+  if (inq.v === 'p-one') {
+    const t = g.find(x => x.id === p.targetGroup);
+    if (!t) return need('Choose the grouping you want to test on the Project & Groupings step.');
+    if (t.eliminated === 'Y') return no(`${esc(groupName(t))} is ruled out${t.elimReason ? ': ' + esc(t.elimReason) : '.'}`);
+    if (t.eliminated !== 'N') return need(`Review ${esc(groupName(t))} on the Elimination step.`);
+    const others = left.filter(x => x !== t);
+    return others.length ? lead(`${esc(groupName(t))} still fits, but so ${others.length === 1 ? 'does' : 'do'} ${names(others)}.`) : done(`Yes: ${esc(groupName(t))} is the only grouping that fits your records.`);
+  }
+  if (open.length) return need(`${open.length} grouping${open.length === 1 ? '' : 's'} still to review on the Elimination step: ${names(open)}.`);
+  const ancestor = p.earliest ? esc(p.earliest) : 'your earliest documented ancestor';
+  switch (inq.v) {
+    case 'p-place':
+      return !left.length ? no('No grouping fits your records. Your line may not be represented in the project yet.')
+        : left.length === 1 ? done(`Narrowed to ${esc(groupName(left[0]))}. This is a narrowed placement, not a confirmed one.`)
+        : lead(`${left.length} groupings still fit: ${names(left)}. More records or a Y-DNA test would decide between them.`);
+    case 'p-rep':
+      return !left.length ? no('Not yet: every grouping conflicts with your records. Your line may not have a tester in the project.')
+        : done(`Yes: ${left.length === 1 ? 'one grouping fits' : left.length + ' groupings fit'}: ${names(left)}.`);
+    case 'p-test':
+      return left.length === 1 ? done(`Test a direct male-line descendant of ${ancestor}. A match to ${esc(groupName(left[0]))}${left[0].snps ? ` (sharing ${esc(left[0].snps)})` : ''} would confirm the placement.`)
+        : left.length ? lead(`Test a direct male-line descendant of ${ancestor}. His result would decide between ${names(left)}.`)
+        : lead(`Test a direct male-line descendant of ${ancestor}. Since no grouping fits, his result would show which lineage your line belongs to.`);
+  }
+  return null;
+}
+function pInquiryCard(p) {
+  const inq = pInquiryOf(p), st = pInquiryStatus(p);
+  if (!inq || !st) return '';
+  return `<div class="card"><div class="card-head"><h3>Your question</h3>${pill(st.c, st.label)}</div><p style="margin:0 0 6px"><b>${esc(inq.q)}</b></p><p class="hint" style="margin:0">${st.msg}</p></div>`;
+}
 function outcomeBox(p) {
   const o = projectOutcome(p);
   return `<div class="verdict ${o.c === 'grey' ? '' : o.c}"><div><b>${esc(o.title)}</b><div class="hint">${esc(o.msg)}</div></div></div>`;
 }
 
 function ptGroups(p) {
+  const inq = pInquiryOf(p);
   return `<div class="card">
+    <h3>What do you want to find out?</h3>
+    <div class="grid2"><div class="field"><label>Your question</label><select data-anc="inquiry"><option value="">— choose a question —</option>${P_INQUIRIES.map(o => `<option value="${o.v}"${p.inquiry === o.v ? ' selected' : ''}>${esc(o.q)}</option>`).join('')}</select></div>
+      ${inq && inq.v === 'p-one' ? `<div class="field"><label>Which grouping?</label><select data-anc="targetGroup"><option value="">${p.groups.length ? '— choose a grouping —' : 'Add groupings below first'}</option>${p.groups.map(x => `<option value="${esc(x.id)}"${p.targetGroup === x.id ? ' selected' : ''}>${esc(groupName(x))}</option>`).join('')}</select></div>` : ''}</div>
+    ${inq ? `<div class="hint" style="margin-top:8px"><b>You need:</b> ${inq.needs}<br><b>What to look for:</b> ${inq.focus}<br><b>The answer looks like:</b> ${esc(inq.answer)}</div>` : ''}
+  </div>
+  <div class="card">
     <h3>Project and Group Identification Analysis</h3>
     <div class="grid3">
       ${field('Research name', 'name', p.name, { ph: 'e.g. Origins of Michael Joyce of Tuam' })}
@@ -168,7 +233,7 @@ function ptSnpSeg(p) {
 }
 
 function ptElim(p) {
-  return `<div class="card">
+  return `${pInquiryCard(p)}<div class="card">
     <h3>Elimination Matrix</h3>
     <p class="hint">Work through each grouping and remove those that conflict with your documented genealogy — names, locations and known family connections.</p>
     ${editTable('groups', [
@@ -183,7 +248,7 @@ function ptElim(p) {
 
 function ptNarrow(p) {
   const remaining = p.groups.filter(g => g.eliminated !== 'Y');
-  return `<div class="card">
+  return `${pInquiryCard(p)}<div class="card">
     <h3>Lineage Narrowing Analysis</h3>
     <p class="hint">Only groupings that have not been eliminated are shown. A lineage fits when names, locations and known family connections align without contradiction.</p>
     ${editTable('groups', [
@@ -218,6 +283,7 @@ function ptReport(p) {
     <div class="card-head no-print"><span class="hint">A printable summary of this non-tester research.</span><div class="tbl-actions" style="margin:0"><button class="btn small ghost" data-act="download-report">Download (Word)</button><button class="btn small" data-act="print">Print</button></div></div>
     <h1>${esc(p.name || 'Unnamed research')}</h1>
     <p class="muted">${esc(p.surname || '')}${p.projectName ? ' · ' + esc(p.projectName) : ''} · Report generated ${esc(today)}</p>
+    ${pInquiryOf(p) ? `<p><b>Question:</b> ${esc(pInquiryOf(p).q)} ${pill(pInquiryStatus(p).c, pInquiryStatus(p).label)}<br><span class="muted">${pInquiryStatus(p).msg}</span></p>` : ''}
     <p>Earliest documented ancestor: <b>${esc(p.earliest || '—')}</b> · Primary location(s): <b>${esc(p.locations || '—')}</b></p>
     ${outcomeBox(p)}
     <h2>Groupings</h2>
