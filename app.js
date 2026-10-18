@@ -281,7 +281,8 @@ function openConflicts(a) { return a.conflicts.filter(c => c.status !== 'Resolve
 /* SNP evidence is used only for Big Y-700 testers (the SNP-first method). */
 function snpUsed(a) { return a.method === 'SNP'; }
 function verdict(a) {
-  const st = [snpUsed(a) ? snpStatus(a) : null, autoFirst(a) ? autoStatus(a) : strStatus(a), genealogyStatus(a)].filter(Boolean);
+  /* Each method has two lines of evidence: its own DNA evidence, and the genealogy. */
+  const st = [snpFirst(a) ? snpStatus(a) : autoFirst(a) ? autoStatus(a) : strStatus(a), genealogyStatus(a)];
   const open = openConflicts(a);
   if (st.some(s => s.c === 'red')) return { c: 'red', title: 'Conflict in the evidence', msg: 'Record and resolve the conflict before drawing a conclusion.' };
   if (st.every(s => s.c === 'green') && !open) return { c: 'green', title: 'Convergence achieved', msg: `${st.length === 3 ? 'All three' : 'Both'} lines of evidence align. The conclusion should remain open to revision as new evidence emerges.` };
@@ -301,14 +302,14 @@ function nextStep(a) {
     return { tab: 'report', text: 'Review and print the research report.' };
   }
   const needSNP = snpUsed(a) && !targetSNP(a) ? { tab: 'testers', text: 'Add the testers\' SNP paths so their SNP tree can be mapped.' } : null;
-  const needSTR = a.testers.length > 1 && !a.gdPairs.length ? { tab: 'str', text: 'Compare testers with a Genetic Distance analysis.' } : null;
+  const needSTR = !snpFirst(a) && a.testers.length > 1 && !a.gdPairs.length ? { tab: 'str', text: 'Compare testers with a Genetic Distance analysis.' } : null;
   if (!a.testers.length) return { tab: 'testers', text: 'Add the Y-DNA testers who descend from this ancestor.' };
   if (a.testers.some(t => num(t.generations) == null || num(t.birth) == null)) return { tab: 'testers', text: 'Add the tester birth year and generations for every tester.' };
   const first = snpFirst(a) ? needSNP : needSTR, second = snpFirst(a) ? needSTR : needSNP;
   if (first) return first;
   if (!a.documents.length) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
   if (second) return second;
-  const sn = snpUsed(a) ? snpStatus(a) : { c: 'green' }, sr = strStatus(a), sg = genealogyStatus(a);
+  const sn = snpUsed(a) ? snpStatus(a) : { c: 'green' }, sr = snpFirst(a) ? { c: 'green' } : strStatus(a), sg = genealogyStatus(a);
   if (sn.c === 'red' || sr.c === 'red' || sg.c === 'red') return { tab: 'convergence', text: 'Record the conflict and work out a resolution path.' };
   const amber = (snpFirst(a) ? [['snp', sn], ['documents', sg], ['str', sr]] : [['str', sr], ['documents', sg], ['snp', sn]]).find(x => x[1].c === 'amber');
   if (amber) return { tab: amber[0], text: amber[1].msg };
@@ -415,12 +416,13 @@ const TABS = [
 /* Research method: STR-first (default) or SNP-first. The two swap the places of STR Analysis and SNP Analysis. */
 const METHODS = [
   { v: '', l: 'STR-first — basic marker tests (Y-37, Y-67, Y-111)', best: 'For testers with the basic marker tests (Y-37, Y-67 or Y-111). Genetic Distance shows who is closely related and the records build the line. SNPs are not used.' },
-  { v: 'SNP', l: 'SNP-first — Big Y-700 testers only', best: 'Only for testers who have taken the Big Y-700. Their SNP paths map out the testers\' SNP tree and show where their lines meet, the records build the line, and the STR markers narrow the generations.' },
+  { v: 'SNP', l: 'SNP-first — Big Y-700 testers only', best: 'Only for testers who have taken the Big Y-700. Their SNP paths map out the testers\' SNP tree and show where their lines meet, and the records build the line.' },
   { v: 'AUTO', l: 'Autosomal-first — AncestryDNA, Family Finder, 23andMe or MyHeritage', best: '' }
 ];
 function snpFirst(a) { return a.method === 'SNP'; }
-function methodOrder(a, list) { const i = list.indexOf('str'), j = list.indexOf('snp'); if (!snpFirst(a) || i < 0 || j < 0) return list; const r = list.slice(); r[i] = 'snp'; r[j] = 'str'; return r; }
-function tabsFor(a) { const t = TABS.filter(x => (x[0] !== 'snp' || snpUsed(a)) && (x[0] !== 'society' || wantsSociety(a)) && (autoFirst(a) ? !['testers', 'str', 'snp'].includes(x[0]) : !['matches', 'auto'].includes(x[0]))); return methodOrder(a, t.map(x => x[0])).map(k => t.find(x => x[0] === k)); }
+/* SNP-first: SNP Analysis comes straight after the testers, before the documents. */
+function methodOrder(a, list) { const i = list.indexOf('testers'); if (!snpFirst(a) || i < 0 || !list.includes('snp')) return list; const r = list.filter(k => k !== 'snp'); r.splice(i + 1, 0, 'snp'); return r; }
+function tabsFor(a) { const t = TABS.filter(x => (x[0] !== 'snp' || snpUsed(a)) && (x[0] !== 'society' || wantsSociety(a)) && (autoFirst(a) ? !['testers', 'str', 'snp'].includes(x[0]) : !['matches', 'auto'].includes(x[0])) && (x[0] !== 'str' || !snpFirst(a))); return methodOrder(a, t.map(x => x[0])).map(k => t.find(x => x[0] === k)); }
 /* The Lineage Society step only appears when the research question is about proving the line to a society. */
 function wantsSociety(a) { const q = inquiryOf(a); return !!q && /society$/.test(q.v); }
 function render() {
@@ -454,7 +456,7 @@ function render() {
 let startAns = {};
 const START_PATHS = {
   snp: { title: 'Your path: SNP-first', why: 'Big Y-700 results show each tester\'s SNPs, which map the testers\' tree and show where their lines meet.',
-    gather: ['Each tester\'s FamilyTreeDNA results, or the details he shares with you.', 'Each tester\'s SNP path: look up his terminal SNP in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open Ancestral Path.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.', 'Optional: the Genetic Distance between testers from the Y-DNA Matches page, to compare their STR markers too.'] },
+    gather: ['Each tester\'s FamilyTreeDNA results, or the details he shares with you.', 'Each tester\'s SNP path: look up his terminal SNP in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open Ancestral Path.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.'] },
   str: { title: 'Your path: STR-first', why: 'Y-37, Y-67 and Y-111 results show how closely testers match on their markers (the Genetic Distance), which estimates how many generations back they connect.',
     gather: ['Each tester\'s Y-DNA Matches list from FamilyTreeDNA: who matches, the Genetic Distance (GD) and how many markers were compared.', 'Each tester\'s birth year, and how many generations he is from the ancestor (his father is generation 1).', 'Your family tree back to the earliest known ancestor, with the records that support it.', 'Optional: the marker values that differ between two testers, from the Y-STR results page, for a more exact estimate.'] },
   auto: { title: 'Your path: Autosomal-first', why: 'An autosomal test (AncestryDNA, FamilyTreeDNA Family Finder, 23andMe or MyHeritage) shows how much DNA you share with each match, which tests the recent generations of your line, about the last five or six, on any side of the family.',
@@ -467,20 +469,21 @@ function startHereHTML() {
   const sel = (name, opts) => `<select data-start="${name}"><option value="">— choose —</option>${opts.map(o => `<option value="${o[0]}"${startAns[name] === o[0] ? ' selected' : ''}>${o[1]}</option>`).join('')}</select>`;
   return `<div class="card">
     <h3>Start here</h3>
-    <p class="hint">New to Y-DNA research? Answer two questions and the app will show you where to begin and what to gather first. Not sure yet? Look at a finished <a href="#" data-act="load-example">Y-DNA example</a> or <a href="#" data-act="load-example" data-k="auto">autosomal example</a> first.</p>
+    <p class="hint">New to Y-DNA research? Answer two questions and the app will show you where to begin and what to gather first. Not sure yet? Look at a finished <a href="#" data-act="load-example">SNP example</a>, <a href="#" data-act="load-example" data-k="str">STR example</a> or <a href="#" data-act="load-example" data-k="auto">autosomal example</a> first.</p>
     <div class="grid2">
       <div class="field"><label>1. Have you, or a relative on the line you are researching, taken a DNA test?</label>${sel('tested', [['Y', 'Yes'], ['N', 'No, not yet']])}</div>
       ${t === 'Y' ? `<div class="field"><label>2. Which test?</label>${sel('test', [['snp', 'Big Y-700'], ['str', 'Y-37, Y-67 or Y-111'], ['auto', 'An autosomal test (AncestryDNA, Family Finder, 23andMe or MyHeritage)']])}</div>` : ''}
     </div>
     ${P ? `<div class="verdict" style="margin-top:14px;display:block"><b>${P.title}</b><div class="hint" style="margin:4px 0 10px">${P.why}</div>
       <b>Gather these first:</b><ul style="margin:6px 0 12px 18px">${P.gather.map(x => `<li>${x}</li>`).join('')}</ul>
-      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : key === 'auto' ? 'AUTO' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example" data-k="${key === 'auto' ? 'auto' : ''}">Look at a finished example</button></div></div>` : ''}
+      <div class="tbl-actions" style="margin:0">${key === 'non' ? '<button class="btn" data-act="start-project">Start my first research</button>' : `<button class="btn" data-act="start-case" data-m="${key === 'snp' ? 'SNP' : key === 'auto' ? 'AUTO' : ''}">Start my first case</button>`}<button class="btn ghost" data-act="load-example" data-k="${key === 'snp' ? '' : key}">Look at a finished example</button></div></div>` : ''}
   </div>`;
 }
 /* A finished example case for a made-up family, so a beginner can see what good entries look like at every step. */
 function loadExample(kind) {
   if (kind === 'auto') return loadAutoExample();
-  let a = S.ancestors.find(x => x.example && x.method !== 'AUTO');
+  if (kind === 'str') return loadStrExample();
+  let a = S.ancestors.find(x => x.example && x.method === 'SNP');
   if (!a) {
     const t = (id, label, birth, path, line, location) => ({ id, label, birth, generations: '10', test: 'Big Y-700', path, line, location });
     a = fixAncestor({ id: uid(), example: true, name: 'William Hartwell (example)', birth: '1580', death: '1642', place: 'Kent, England', method: 'SNP', inquiry: 'right',
@@ -488,7 +491,6 @@ function loadExample(kind) {
       testers: [t('ex1', 'John Hartwell', '1924', 'R-FT12345, R-Y98765', 'Thomas Hartwell (1702–1770)', 'Kent, England'),
         t('ex2', 'Samuel Hartwell', '1955', 'R-FT54321, R-Y98765', 'Richard Hartwell (1698–1761)', 'Virginia'),
         t('ex3', 'Peter Hartwell', '1950', 'R-FT54321, R-Y98765', 'Richard Hartwell (1698–1761)', 'Maryland')],
-      gdPairs: [{ id: uid(), a: 'ex1', b: 'ex2', markers: '111', gd: '3' }, { id: uid(), a: 'ex2', b: 'ex3', markers: '111', gd: '1' }],
       documents: [
         { id: uid(), type: 'Baptism', date: '1580', place: 'Ashford, Kent', source: 'Ashford parish register', notes: 'Baptism of William, son of Robert Hartwell', supports: 'Y' },
         { id: uid(), type: 'Probate / Will', date: '1642', place: 'Ashford, Kent', source: 'Will of William Hartwell, Kent archives', notes: 'Names his sons Thomas and Richard', supports: 'Y' },
@@ -497,6 +499,28 @@ function loadExample(kind) {
     saveData();
   }
   view = { page: 'ancestor', id: a.id, tab: 'testers' };
+  render(); window.scrollTo(0, 0);
+}
+/* The STR-first example: Y-111 testers compared by Genetic Distance, with the generations each GD points to. */
+function loadStrExample() {
+  let a = S.ancestors.find(x => x.example && !x.method);
+  if (!a) {
+    const t = (id, label, birth, generations, line, location) => ({ id, label, birth, generations, test: 'Y-111', line, location });
+    a = fixAncestor({ id: uid(), example: true, name: 'George Whitlock (example)', birth: '1702', death: '1771', place: 'Augusta County, Virginia', method: '', inquiry: 's-right',
+      notes: 'Michael, Robert and Daniel Whitlock all believe they descend from George Whitlock of Augusta County through his sons Joseph and Thomas.',
+      testers: [t('sx1', 'Michael Whitlock', '1948', '7', 'Joseph Whitlock (1735–1801)', 'Virginia'),
+        t('sx2', 'Robert Whitlock', '1955', '7', 'Joseph Whitlock (1735–1801)', 'Tennessee'),
+        t('sx3', 'Daniel Whitlock', '1961', '8', 'Thomas Whitlock (1738–1810)', 'Kentucky')],
+      gdPairs: [{ id: uid(), a: 'sx1', b: 'sx2', markers: '111', gd: '2', consistent: 'Y', interp: 'Close match, as expected for two descendants of Joseph.' },
+        { id: uid(), a: 'sx2', b: 'sx3', markers: '111', gd: '3', consistent: 'Y', interp: 'Further apart, as expected for lines that meet at George.' }],
+      documents: [
+        { id: uid(), type: 'Land / Deed', date: '1745', place: 'Augusta County, Virginia', source: 'Augusta County deed book', notes: 'George Whitlock buys 200 acres on the South River', supports: 'Y' },
+        { id: uid(), type: 'Probate / Will', date: '1771', place: 'Augusta County, Virginia', source: 'Will of George Whitlock, Augusta County will book', notes: 'Names his sons Joseph and Thomas', supports: 'Y' },
+        { id: uid(), type: 'Census', date: '1790', place: 'Augusta County, Virginia', source: 'Virginia tax lists (1790 census substitute)', notes: 'Joseph and Thomas Whitlock listed as neighbours', supports: 'Y' }] });
+    S.ancestors.push(a);
+    saveData();
+  }
+  view = { page: 'ancestor', id: a.id, tab: 'str' };
   render(); window.scrollTo(0, 0);
 }
 /* The autosomal example: made-up matches who descend from one ancestor, on her side of the family. */
@@ -564,7 +588,7 @@ function chooseTestHTML(a) {
 }
 function renderAncestor(a) {
   if (!a.testChosen) return chooseTestHTML(a);
-  const st = autoFirst(a) ? [['Autosomal', autoStatus(a)], ['Genealogy', genealogyStatus(a)]] : (snpFirst(a) ? [['SNP', snpStatus(a)], ['Genealogy', genealogyStatus(a)], ['STR', strStatus(a)]] : [['STR', strStatus(a)], ['Genealogy', genealogyStatus(a)], ['SNP', snpStatus(a)]]).filter(s => s[0] !== 'SNP' || snpUsed(a));
+  const st = autoFirst(a) ? [['Autosomal', autoStatus(a)], ['Genealogy', genealogyStatus(a)]] : snpFirst(a) ? [['SNP', snpStatus(a)], ['Genealogy', genealogyStatus(a)]] : [['STR', strStatus(a)], ['Genealogy', genealogyStatus(a)]];
   if (view.tab === 'snp' && !snpUsed(a)) view.tab = 'overview';
   if (view.tab === 'society' && !wantsSociety(a)) view.tab = 'overview';
   if (!tabsFor(a).some(t => t[0] === view.tab)) view.tab = 'overview';
@@ -839,7 +863,7 @@ function ancPrompt(a) {
 
 /* ----- Tab 1: Overview ----- */
 function tabOverview(a) {
-  const st = autoFirst(a) ? [['Autosomal evidence', autoStatus(a)], ['Genealogical evidence', genealogyStatus(a)]] : (snpFirst(a) ? [['SNP evidence', snpStatus(a)], ['Genealogical evidence', genealogyStatus(a)], ['STR evidence', strStatus(a)]] : [['STR evidence', strStatus(a)], ['Genealogical evidence', genealogyStatus(a)], ['SNP evidence', snpStatus(a)]]).filter(s => s[0] !== 'SNP evidence' || snpUsed(a));
+  const st = autoFirst(a) ? [['Autosomal evidence', autoStatus(a)], ['Genealogical evidence', genealogyStatus(a)]] : snpFirst(a) ? [['SNP evidence', snpStatus(a)], ['Genealogical evidence', genealogyStatus(a)]] : [['STR evidence', strStatus(a)], ['Genealogical evidence', genealogyStatus(a)]];
   const v = verdict(a), ns = nextStep(a), shared = sharedSNP(a.testers);
   return `
   ${(() => {
@@ -1200,7 +1224,7 @@ function autoEvidence(a) {
     { key: 'gen', type: 'Genealogical records', result: a.documents.length ? `${a.documents.filter(d => d.supports === 'Y').length} of ${a.documents.length} document(s) support the lineage${a.documents.some(d => d.supports === 'N') ? `, ${a.documents.filter(d => d.supports === 'N').length} contradict it` : ''}` : '—', ok: a.documents.some(d => d.supports === 'N') ? false : a.documents.some(d => d.supports === 'Y') ? true : null }
   ];
   /* Listed in the order of the research method. */
-  return autoFirst(a) ? [autoEvidenceRow(a), rest[1]] : snpFirst(a) ? snpRows.concat(rest.slice(1), rest[0]) : rest.concat(snpRows);
+  return autoFirst(a) ? [autoEvidenceRow(a), rest[1]] : snpFirst(a) ? snpRows.concat(rest.slice(1)) : rest;
 }
 /* Convergence chart: every line of evidence counted as supporting, contrary or not yet tested.
    Uses the "Consistent?" choice where one is set, otherwise the automatic result. */
@@ -1236,7 +1260,7 @@ function tabConvergence(a) {
   return `
   <div class="card">
     <h3>Convergence Analysis</h3>
-    <p class="hint">Convergence is the alignment of SNP data, STR results and genealogy within expected ranges. Results are filled in from the other tabs; use “Consistent?” to override where your judgment differs.</p>
+    <p class="hint">Convergence is the alignment of ${snpFirst(a) ? 'SNP data' : autoFirst(a) ? 'autosomal DNA' : 'STR results'} and genealogy within expected ranges. Results are filled in from the other tabs; use “Consistent?” to override where your judgment differs.</p>
     <div class="conv-layout">
       <div class="conv-left">
         ${convergenceChart(a)}
@@ -1259,7 +1283,7 @@ function tabConvergence(a) {
   </div>
   <div class="card">
     <h3>Conflict Resolution Analysis</h3>
-    <p class="hint">Where the evidence does not align, record the conflict and reassess SNPs, STRs and genealogy. SNP data serves as the foundation, STRs add supporting detail, and genealogy and historical context refine the conclusion.</p>
+    <p class="hint">Where the evidence does not align, record the conflict and reassess the ${snpFirst(a) ? 'SNP data' : autoFirst(a) ? 'autosomal DNA' : 'STR results'} and the genealogy. The DNA serves as the foundation, and genealogy and historical context refine the conclusion.</p>
     ${editTable('conflicts', [
       { k: 'type', label: 'Conflict type', type: 'select', opts: CONFLICT_TYPES },
       { k: 'source', label: 'Source', type: 'textarea', w: 170 },
@@ -1428,7 +1452,7 @@ function societyDNA(a) {
   /* The DNA evidence from this case that can support a link: the shared SNP and the GD comparisons. */
   const tgt = targetSNP(a), yr = num(a.ftdnaDate), out = [];
   if (snpUsed(a) && tgt) out.push(`Shared SNP <b>${esc(tgt)}</b>${yr != null ? ` (formed c. ${yr})` : ''}, carried by ${a.testers.filter(t => pathOf(t).some(x => normSNP(x) === normSNP(tgt))).map(t => esc(testerLabel(t))).join(', ') || 'the testers'}.`);
-  a.gdPairs.forEach(p => { const e = pairEval(a, p), q = e.ta && e.tb ? pairGens(a, e) : null; if (q) out.push(`${esc(testerLabel(e.ta))} and ${esc(testerLabel(e.tb))}: GD ${e.gd} on ${e.markers} markers, about ${q.mid} generations (${q.lo}–${q.hi}).`); });
+  if (!snpFirst(a)) a.gdPairs.forEach(p => { const e = pairEval(a, p), q = e.ta && e.tb ? pairGens(a, e) : null; if (q) out.push(`${esc(testerLabel(e.ta))} and ${esc(testerLabel(e.tb))}: GD ${e.gd} on ${e.markers} markers, about ${q.mid} generations (${q.lo}–${q.hi}).`); });
   return out;
 }
 function tabSociety(a) {
@@ -1501,7 +1525,7 @@ function tabReport(a) {
     <h2>Genetic Distance</h2>
     ${simpleTable(['Pair', 'Markers', 'GD', 'GD group', 'Consistent?', 'Interpretation'], a.gdPairs.map(p => { const e = pairEval(a, p); return [esc(testerLabel(e.ta) + ' – ' + testerLabel(e.tb)), e.markers == null ? '—' : e.markers, e.gd == null ? '—' : e.gd, e.group ? esc(e.group.label) : '—', ynPill(e.within), esc(p.interp)]; }))}
     ${a.gdPairs.map(p => reportGDChart(a, pairEval(a, p))).join('')}${a.gdPairs.some(p => pairGens(a, pairEval(a, p))) ? reportKey([['anc', 'Ancestor'], ['est', 'GD estimate']]) : ''}`;
-      return (autoFirst(a) ? [autoReportHTML(a), docs] : snpFirst(a) ? [snp, docs, gd] : [gd, docs, snp]).join('');
+      return (autoFirst(a) ? [autoReportHTML(a), docs] : snpFirst(a) ? [snp, docs] : [gd, docs]).join('');
     })()}
     <h2>Convergence Analysis</h2>
     ${simpleTable(['Evidence type', 'Result', 'Consistent?', 'Notes'], ev.map(e => { const c = a.conv[e.key] || {}; const ok = c.ov === 'Y' ? true : c.ov === 'N' ? false : e.ok; return [esc(e.type), esc(e.result), ynPill(ok), esc(c.note)]; }).concat(a.extraEvidence.map(x => [esc(x.type), esc(x.result), x.ok === 'Y' ? ynPill(true) : x.ok === 'N' ? ynPill(false) : ynPill(null), ''])))}
