@@ -205,7 +205,8 @@ function genRow(a, t) {
   const aligned = diff != null ? diff <= (yps || 0) : null;
   const gensBefore = diff != null && ypg ? Math.round(-diff / ypg) : null;
   /* A tester whose terminal SNP is the shared SNP has no SNPs below it: that is not an error, so GPS is not judged. */
-  const gpsOK = gps != null && snps > 1 ? gps >= num(S.settings.gpsMin) && gps <= num(S.settings.gpsMax) : null;
+  /* A circa generation count is allowed one generation either way. */
+  const gpsOK = gps != null && snps > 1 ? (t.circa ? [gens - 1, gens, gens + 1] : [gens]).some(g => g / snps >= num(S.settings.gpsMin) && g / snps <= num(S.settings.gpsMax)) : null;
   return { t, tgt, snps, gens, ypg, ypgOwn, gps, yps, years, tb, ftdna, diff, gensBefore, aligned, gpsOK, docYPG };
 }
 
@@ -317,6 +318,8 @@ function strStatus(a) {
 function genealogyStatus(a) {
   if (ovr(a, 'gen') === 'N') return { c: 'red', msg: 'Genealogical records marked inconsistent.' };
   if (snpUsed(a) && ovr(a, 'date') === 'N') return { c: 'red', msg: 'Shared SNP date marked inconsistent with the ancestor.' };
+  /* Lost records (a burned courthouse, say): the records neither support nor contradict the line, unless a surviving document does. */
+  if (a.recordsLost) return a.documents.some(d => d.supports === 'N') ? { c: 'red', msg: 'A document contradicts the lineage.' } : { c: 'grey', lost: true, msg: `Records lost${a.recordsLostNote ? ': ' + a.recordsLostNote : ''}. They are not counted for or against the line.` };
   if (!a.documents.length && !a.testers.length) return { c: 'grey', msg: 'No documents or testers yet.' };
   if (!a.documents.length) return { c: 'amber', msg: 'No documents recorded for this ancestor.' };
   if (snpUsed(a) && ovr(a, 'date') !== 'Y') {
@@ -341,6 +344,7 @@ function verdict(a) {
   const st = [snpFirst(a) ? snpStatus(a) : autoFirst(a) ? autoStatus(a) : strStatus(a), genealogyStatus(a)];
   const open = openConflicts(a);
   if (st.some(s => s.c === 'red')) return { c: 'red', title: 'Conflict in the evidence', msg: 'Record and resolve the conflict before drawing a conclusion.' };
+  if (st[1].lost && st[0].c === 'green' && !open) return { c: 'green', title: 'DNA supports the line', msg: 'The records for this line are lost, so the conclusion rests on the DNA evidence. It should remain open to revision as new evidence emerges.' };
   if (st.every(s => s.c === 'green') && !open) return { c: 'green', title: 'Convergence achieved', msg: `${st.length === 3 ? 'All three' : 'Both'} lines of evidence align. The conclusion should remain open to revision as new evidence emerges.` };
   if (open) return { c: 'amber', title: 'Unresolved conflicts', msg: `${open} conflict(s) still open on the Convergence tab.` };
   return { c: 'amber', title: 'Research in progress', msg: 'Not every line of evidence has been tested yet.' };
@@ -352,7 +356,7 @@ function nextStep(a) {
     if (!a.atMatches.length) return { tab: 'matches', text: 'Add your autosomal DNA matches who descend from this ancestor.' };
     if (sa.c === 'red' || sg.c === 'red') return { tab: 'convergence', text: 'Record the conflict and work out a resolution path.' };
     if (sa.c === 'amber') return { tab: 'matches', text: sa.msg };
-    if (!a.documents.length) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
+    if (!a.documents.length && !a.recordsLost) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
     if (sg.c === 'amber') return { tab: 'documents', text: sg.msg };
     if (openConflicts(a)) return { tab: 'convergence', text: 'Resolve the open conflicts.' };
     return { tab: 'report', text: 'Review and print the research report.' };
@@ -363,7 +367,7 @@ function nextStep(a) {
   if (a.testers.some(t => num(t.generations) == null || num(t.birth) == null)) return { tab: 'testers', text: 'Add the tester birth year and generations for every tester.' };
   const first = snpFirst(a) ? needSNP : needSTR, second = snpFirst(a) ? needSTR : needSNP;
   if (first) return first;
-  if (!a.documents.length) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
+  if (!a.documents.length && !a.recordsLost) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
   if (second) return second;
   const sn = snpUsed(a) ? snpStatus(a) : { c: 'green' }, sr = snpFirst(a) ? { c: 'green' } : strStatus(a), sg = genealogyStatus(a);
   if (sn.c === 'red' || sr.c === 'red' || sg.c === 'red') return { tab: 'convergence', text: 'Record the conflict and work out a resolution path.' };
@@ -380,8 +384,10 @@ function editTable(coll, cols, rows, opts = {}) {
   const body = rows.length ? rows.map(r => {
     const cells = cols.map(c => {
       if (c.type === 'calc') return `<td class="calc">${c.render(r)}</td>`;
+      if (c.type === 'check') return `<td style="text-align:center;min-width:${c.w || 60}px"><input type="checkbox" data-coll="${coll}" data-id="${esc(r.id)}" data-k="${c.k}"${r[c.k] ? ' checked' : ''}></td>`;
       const attrs = `data-coll="${coll}" data-id="${esc(r.id)}" data-k="${c.k}"`;
-      const v = r[c.k] == null ? '' : r[c.k];
+      /* c.def: a value filled in for the user until they type their own. */
+      const v = r[c.k] == null || r[c.k] === '' ? (c.def ? c.def(r) : '') : r[c.k];
       if (c.type === 'select') {
         const o = (c.opts || []).map(op => {
           const val = typeof op === 'object' ? op.v : op, lab = typeof op === 'object' ? op.l : op;
@@ -696,7 +702,7 @@ function reportGenChart(a, r) {
   const { G, T, before } = L;
   const gens = Array.from({ length: T }, (_, j) => rcCell(j + 1 === G ? 'anc' : j + 1 > G ? 'pre' : 'gen', j + 1)).join('');
   const snpRow = L.spans.length ? `<tr>${L.spans.map(sp => rcCell('snp', esc(sp.name) + (sp.year != null ? `<br><span style="font-size:11px;font-weight:400">c. ${sp.year}</span>` : ''), `colspan="${sp.len}" `)).join('')}</tr>` : '';
-  return rcLabel(`${esc(testerLabel(r.t))} · ${G} generations back to ${esc(a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}`) + rcTable(`<tr>${gens}</tr>${snpRow}`);
+  return rcLabel(`${esc(testerLabel(r.t))} · ${genText(r.t, G)} generations back to ${esc(a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}`) + rcTable(`<tr>${gens}</tr>${snpRow}`);
 }
 /* GD chart for one STR comparison: generations back to the ancestor, with the GD estimate placed on them. */
 /* GD generation chart, shared by the ancestor's comparisons and the GD calculator. A is the documented generations (0 if unknown).
@@ -769,6 +775,10 @@ const INQUIRIES = [
     needs: 'A tester whose paper trail stops at a man, plus matches whose trees go further back.',
     focus: 'See which matches share the lowest SNP with the tester. Their family trees point to the family of the generation above the brick wall, and where to search the records.',
     answer: 'e.g. "His closest SNP matches all descend from the Lancashire Barrows."' },
+  { v: 'bwall', q: 'Do these brick-wall lines connect to one family?',
+    needs: 'Big Y-700 testers whose paper trails stop at different brick-wall ancestors, with each brick-wall ancestor\'s birth year.',
+    focus: 'Find the SNP all the testers share and enter its FTDNA formation date. If it formed before the brick-wall ancestors were born, they all descend from one man living around that date. You do not need to know which man the SNP formed in.',
+    answer: 'e.g. "Yes: all 4 testers share R-FT249997, formed c. 1640, before their brick-wall ancestors."' },
   { v: 'npe', q: 'Did a surname change or non-paternal event happen?',
     needs: 'A tester who expected to match a surname group but does not, or who matches a different surname.',
     focus: 'Find where his path leaves the surname group\'s tree, and when that SNP formed. An old split happened before the records; a recent one points to the last few generations.',
@@ -804,6 +814,10 @@ const STR_INQUIRIES = [
     needs: 'A tester whose paper trail stops at a man, plus matches whose trees go further back.',
     focus: 'Compare the tester with each match. The matches with the lowest GD point to the family above the brick wall; search their trees.',
     answer: 'e.g. "Closest matches descend from the Hartwells of Kent; search there."' },
+  { v: 's-bwall', q: 'Do these brick-wall lines connect to one family?',
+    needs: 'Testers whose paper trails stop at different brick-wall ancestors, with how many generations each is from his brick wall, and a GD comparison for each pair.',
+    focus: 'Each GD comparison estimates how many generations back two testers connect. If the estimate reaches past both testers\' brick walls, their lines can connect in one family above them, even with no records to show it.',
+    answer: 'e.g. "Yes: every pair connects about 10 generations back, about 2 above their brick walls."' },
   { v: 's-npe', q: 'Did a surname change or non-paternal event happen?',
     needs: 'A tester who expected to match a surname group.',
     focus: 'Compare him with the group. A GD too high for a shared surname line (a distant match, GD 5+) points to a break in his line.',
@@ -839,15 +853,29 @@ function strInquiryStatus(a, inq, need, done, lead, no) {
     case 's-close':
       return far.length ? no(`Not all closely related: ${far.map(desc).join('; ')}.`) : done(`Yes: ${P.map(desc).join('; ')}.`);
     case 's-right': {
-      const chk = P.map(x => { const g = [num(x.e.ta.generations), num(x.e.tb.generations)].filter(v => v != null), G = g.length ? Math.round(g.reduce((t, v) => t + v, 0) / g.length) : null; return { x, G, ok: G != null && G >= x.q.lo && G <= x.q.hi }; });
+      const chk = P.map(x => { const g = [num(x.e.ta.generations), num(x.e.tb.generations)].filter(v => v != null), G = g.length ? Math.round(g.reduce((t, v) => t + v, 0) / g.length) : null, c = x.e.ta.circa || x.e.tb.circa ? 1 : 0; return { x, G, c, ok: G != null && G >= x.q.lo - c && G <= x.q.hi + c }; });
       if (chk.some(c => c.G == null)) return need('Add each tester\'s generations back to the ancestor on the Testers & DNA step.');
-      return chk.every(c => c.ok) ? done(`Consistent: ${chk.map(c => `${nm(c.x)}, the estimate of ${c.x.q.lo}–${c.x.q.hi} generations includes the ${c.G} documented`).join('; ')}.`)
-        : no(`Not consistent: ${chk.filter(c => !c.ok).map(c => `${nm(c.x)}, the estimate of ${c.x.q.lo}–${c.x.q.hi} generations does not include the ${c.G} documented`).join('; ')}.`);
+      return chk.every(c => c.ok) ? done(`Consistent: ${chk.map(c => `${nm(c.x)}, the estimate of ${c.x.q.lo}–${c.x.q.hi} generations includes the ${c.c ? 'c. ' : ''}${c.G} documented`).join('; ')}.`)
+        : no(`Not consistent: ${chk.filter(c => !c.ok).map(c => `${nm(c.x)}, the estimate of ${c.x.q.lo}–${c.x.q.hi} generations does not include the ${c.c ? 'c. ' : ''}${c.G} documented`).join('; ')}.`);
     }
     case 's-branch':
       return done(`Each tester's closest line, by lowest GD: ${close}.`);
     case 's-when':
       return done(`${P.map(x => `${desc(x)}, about ${fmt(x.q.mid * ypg, 0)} years`).join('; ')}.`);
+    case 's-bwall': {
+      /* Each pair's estimate has to reach past both testers' brick walls for their lines to connect in one family above them. */
+      if (far.length) return no(`No: ${far.map(desc).join('; ')}. That is a distant match, so these lines most likely connect long before the brick walls, if at all in the surname era.`);
+      const W = P.map(x => ({ x, g: Math.max(num(x.e.ta.generations) || 0, num(x.e.tb.generations) || 0) }));
+      if (W.some(w => !(num(w.x.e.ta.generations) >= 1) || !(num(w.x.e.tb.generations) >= 1))) return need('Enter how many generations each tester is from his own brick-wall ancestor (Generations back) on the Testers & DNA step.');
+      const lee = w => w.x.e.ta.circa || w.x.e.tb.circa ? 1 : 0, gl = w => `${lee(w) ? 'c. ' : ''}${w.g}`;
+      const short = W.filter(w => w.x.q.hi + lee(w) < w.g);
+      if (short.length) return lead(`${short.map(w => `${nm(w.x)}: the estimate (${w.x.q.lo}–${w.x.q.hi} generations) does not reach their brick walls at ${gl(w)}`).join('; ')}. Recheck the generations entered and the GD.`);
+      /* Every pair's likely range takes in the brick-wall generation, so the lines fit one family connecting at or above it.
+         GD estimates are not exact, so the documented generation only needs to fall inside the range. */
+      const at = w => [w.x.e.ta, w.x.e.tb].every(t => !t.line || t.line === caseAncestor(a)) && a.name ? `${esc(a.name)}'s generation (${gl(w)})` : `their brick walls (${gl(w)} generations)`;
+      const pairs = W.map(w => `${nm(w.x)}: GD ${w.x.e.gd} on ${w.x.e.markers}, about ${w.x.q.mid} generations back (likely ${w.x.q.lo}–${w.x.q.hi}), which takes in ${at(w)}`).join('; ');
+      return done(`Yes: every pair fits one family. ${pairs}.`);
+    }
     case 's-brick':
       return lead(`Closest matches by GD: ${close}. Search these matches' family trees for the generation above the brick wall.`);
     case 's-npe':
@@ -894,6 +922,24 @@ function inquiryStatus(a) {
     }
     case 'branch':
       return cm.length ? done(`Each tester's closest branch, by the SNP he shares lowest: ${list}.`) : no('No two testers share an SNP in the paths entered.');
+    case 'bwall': {
+      /* The brick-wall lines connect if they share an SNP that formed before the brick-wall ancestors were born. */
+      const nm = t => esc(testerLabel(t));
+      if (!tgt) {
+        const count = {}; paths.forEach(t => pathOf(t).forEach(x => { const k = normSNP(x); count[k] = (count[k] || 0) + 1; }));
+        const top = Math.max(0, ...Object.values(count)), snp = top >= 2 ? pathOf(paths.find(t => pathOf(t).some(x => count[normSNP(x)] === top))).find(x => count[normSNP(x)] === top) : null;
+        if (!snp) return no('No: the testers share no SNP in the paths entered. Check each path reaches back far enough.');
+        const out = paths.filter(t => !carriesSNP(t, snp));
+        return no(`No: ${out.map(nm).join(', ')} ${out.length === 1 ? 'does' : 'do'} not share ${esc(snp)} with the others, so ${out.length === 1 ? 'his line connects' : 'their lines connect'} further back.`);
+      }
+      const y = snpYear(tgt, a), walls = paths.map(t => num(t.lineBirth) != null ? num(t.lineBirth) : !t.line ? num(a.birth) : null).filter(x => x != null);
+      if (y == null) return lead(`All ${paths.length} testers share ${esc(tgt)}. Enter its FTDNA formation date on the SNP Analysis step to see whether it formed before their brick-wall ancestors.`);
+      if (!walls.length) return lead(`All ${paths.length} testers share ${esc(tgt)}, formed c. ${y}. Enter each brick-wall ancestor's birth year on the Testers & DNA step to date the connection.`);
+      const lo = Math.min(...walls), hi = Math.max(...walls), born = lo === hi ? `born ${lo}` : `born ${lo}–${hi}`;
+      if (y > lo) return lead(`All ${paths.length} testers share ${esc(tgt)}, but FTDNA dates it c. ${y}, after the earliest brick-wall ancestor was born (${lo}). FTDNA dates are estimates with wide ranges, so the lines most likely connect close to the brick-wall generation. Check the date range on FTDNA Discover.`);
+      const g = Math.round((lo - y) / (lineageYPG(a) || 33));
+      return done(`Yes: all ${paths.length} testers share ${esc(tgt)}, formed c. ${y}, before their brick-wall ancestors (${born}). Their lines connect in one family ${g >= 1 ? `about ${g} generation${g === 1 ? '' : 's'} above the brick walls` : 'at about the brick-wall generation'}.`);
+    }
     case 'brick':
       return cm.length ? lead(`Closest SNP matches: ${list}. Search these matches' family trees for the generation above the brick wall.`) : need('No two testers share an SNP yet; add matches whose trees go further back.');
     case 'npe': {
@@ -921,6 +967,7 @@ function inquiryCard(a) {
 function ancPrompt(a) {
   const P = {
     right: { q: 'Who is the documented ancestor?', help: 'Enter the man your paper trail leads to, as his name appears in the records, with his birth and death years (estimates are fine) and where he lived. The DNA will test whether he is the right man.' },
+    bwall: { q: 'Who is the ancestor these lines are thought to share?', help: 'Enter the man the brick-wall lines are believed to descend from, such as the earliest man of the surname in the area, with estimated dates and where he lived. Each tester\'s own brick-wall ancestor goes on the Testers & DNA step.' },
     brick: { q: 'Who is your brick-wall ancestor?', help: 'Enter the earliest man you can document in the tester\'s line: the one whose father is unknown. Give his birth and death years (estimates are fine) and where he lived.' },
     branch: { q: 'Who is the ancestor of the family?', help: 'Enter the man the known branches all descend from, if you know him, with his birth and death years (estimates are fine) and where he lived.' },
     npe: { q: 'Who is the ancestor of the surname group?', help: 'Enter the earliest documented man of the surname group the tester expected to match, with his birth and death years (estimates are fine) and where he lived.' },
@@ -994,6 +1041,10 @@ function tabDocuments(a) {
       { k: 'notes', label: 'What it shows', type: 'textarea', w: 220 },
       { k: 'supports', label: 'Supports the lineage?', type: 'select', w: 120, opts: [{ v: '', l: '—' }, { v: 'Y', l: 'Supports' }, { v: 'N', l: 'Contradicts' }] }
     ], a.documents, { addLabel: 'Add document', empty: 'No documents yet.' })}
+    <div class="lost-records" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-anc="recordsLost"${a.recordsLost ? ' checked' : ''} style="margin-top:3px"><span><b>Records for this line are lost</b> <span class="hint">(a burned courthouse, destroyed or missing records)</span><br><span class="hint">The records then count neither for nor against the line, and the conclusion rests on the DNA. Any documents you do have still count.</span></span></label>
+      ${a.recordsLost ? `<div class="grid2" style="margin-top:10px">${field('What was lost', 'recordsLostNote', a.recordsLostNote || '', { ph: 'e.g. Bertie County courthouse fire, 1890' })}</div>` : ''}
+    </div>
   </div>`;
 }
 
@@ -1004,13 +1055,15 @@ function testTypes(a) { return snpFirst(a) ? ['Big Y-700'] : ['Y-111', 'Y-67', '
 function tabTesters(a) {
   return `<div class="card">
     <div class="card-head"><h3>Testers descending from ${esc(a.name || 'this ancestor')}</h3></div>
-    <p class="hint"><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
+    <p class="hint"><b>Earliest documented ancestor</b> is filled in with the ancestor you entered on the Overview step. Change it only if a tester's paper trail stops at a later ancestor.${a.inquiry === 'bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor and his birth year.' : a.inquiry === 's-bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor, and in Generations back how many generations he is from that brick wall.' : ''}<br><b>Circa</b>: tick it when the generations back are a close estimate rather than proven. It shows as "c. 10", and the checks allow one generation either way.<br><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
     ${snpFirst(a) ? '<p class="hint"><b>SNP path</b>: enter the tester\'s terminal SNP, his newest one, in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open <b>Ancestral Path</b>. Copy the SNPs from his terminal SNP back toward this ancestor, separated by commas.</p>' : ''}
     ${editTable('testers', [
       { k: 'label', label: 'Tester', ph: 'e.g. John Hartwell' },
-      { k: 'line', label: 'Earliest documented ancestor', w: 170, ph: 'e.g. William Hartwell' },
+      { k: 'line', label: 'Earliest documented ancestor', w: 170, ph: 'e.g. William Hartwell', def: () => caseAncestor(a) },
+      ...(a.inquiry === 'bwall' ? [{ k: 'lineBirth', label: 'His birth year', type: 'number', w: 90, ph: 'e.g. 1715', def: r => r.line ? '' : (a.birth || '') }] : []),
       { k: 'birth', label: 'Tester birth year', type: 'number', w: 100, ph: 'e.g. 1954' },
       { k: 'generations', label: 'Generations back', type: 'number', w: 90, ph: 'e.g. 10' },
+      { k: 'circa', label: 'Circa', type: 'check', w: 60 },
       { k: 'test', label: 'Test', type: 'select', opts: testTypes(a) },
       snpFirst(a) && { k: 'path', label: 'SNP path (newest → oldest)', type: 'textarea', w: 230, ph: 'e.g. R-FTB42619, R-MF109215, R-Y11201' },
       { k: 'location', label: 'Location', w: 140, ph: 'e.g. Texas' }
@@ -1086,6 +1139,10 @@ function tabSNPNoOwn(a) {
 }
 /* ----- SNP Tree: one tree built from every tester in every ancestor, with each SNP assigned to an ancestor ----- */
 function ancLabel(x) { return `${x.name || 'Unnamed ancestor'}${lifeYears(x) ? ' (' + lifeYears(x) + ')' : ''}`; }
+/* The case's ancestor as entered on the Overview step: the default earliest documented ancestor for each tester. */
+/* A tester's generations back, marked "c." when they are a close estimate rather than proven. */
+function genText(t, g = num(t.generations)) { return g == null ? '—' : `${t.circa ? 'c. ' : ''}${g}`; }
+function caseAncestor(a) { return a.name && a.name !== 'New ancestor' ? ancLabel(a) : ''; }
 /* The ancestors a SNP is assigned to: set in each ancestor's Overview (Ancestral SNP and FTDNA formation date). */
 /* The year an SNP formed (FTDNA Discover), entered beside it on the tree; for the case's shared SNP this is the FTDNA formation date. */
 function snpYear(snp, a) {
@@ -1205,7 +1262,7 @@ function tabSNP(a) {
       <td style="white-space:nowrap">${esc(testerLabel(r.t))}</td>
       <td class="calc">${r.tb == null ? '—' : r.tb}</td>
       <td style="width:90px;min-width:80px"><input type="number" data-coll="testers" data-id="${esc(r.t.id)}" data-k="snpCount" value="${esc(r.t.snpCount || '')}" placeholder="${r.snps != null && num(r.t.snpCount) == null ? r.snps : 'auto'}"></td>
-      <td class="calc">${r.gens == null ? '—' : r.gens}</td>
+      <td class="calc">${genText(r.t, r.gens)}</td>
       <td class="calc">${fmt(r.gps)} ${r.gpsOK === false ? pill('amber', 'outside ' + S.settings.gpsMin + '–' + S.settings.gpsMax) : ''}</td>
       <td class="calc">${fmt(r.ypg)}${r.ypgOwn ? '' : ' ' + pill('', 'fallback')}</td>
       <td class="calc">${fmt(r.years, 0)}</td>
@@ -1293,7 +1350,7 @@ function autoEvidence(a) {
   ];
   const rest = [
     { key: 'str', type: 'STR genetic distance', result: pairs.filter(e => e.gd != null).map(e => `${testerLabel(e.ta)}–${testerLabel(e.tb)}: GD ${e.gd}`).join(', ') || '—', ok: yn(pairs.map(e => e.within).filter(x => x != null)) },
-    { key: 'gen', type: 'Genealogical records', result: a.documents.length ? `${a.documents.filter(d => d.supports === 'Y').length} of ${a.documents.length} document(s) support the lineage${a.documents.some(d => d.supports === 'N') ? `, ${a.documents.filter(d => d.supports === 'N').length} contradict it` : ''}` : '—', ok: a.documents.some(d => d.supports === 'N') ? false : a.documents.some(d => d.supports === 'Y') ? true : null }
+    { key: 'gen', type: 'Genealogical records', result: a.recordsLost ? `Records lost${a.recordsLostNote ? ': ' + a.recordsLostNote : ''}. Not counted for or against the line.` : a.documents.length ? `${a.documents.filter(d => d.supports === 'Y').length} of ${a.documents.length} document(s) support the lineage${a.documents.some(d => d.supports === 'N') ? `, ${a.documents.filter(d => d.supports === 'N').length} contradict it` : ''}` : '—', ok: a.documents.some(d => d.supports === 'N') ? false : a.documents.some(d => d.supports === 'Y') ? true : null }
   ];
   /* Listed in the order of the research method. */
   return autoFirst(a) ? [autoEvidenceRow(a), rest[1]] : snpFirst(a) ? snpRows.concat(rest.slice(1)) : rest;
@@ -1301,9 +1358,20 @@ function autoEvidence(a) {
 /* Convergence chart: every line of evidence counted as supporting, contrary or not yet tested.
    Uses the "Consistent?" choice where one is set, otherwise the automatic result. */
 function convergenceChart(a) {
-  const vals = autoEvidence(a).map(e => { const ov = (a.conv[e.key] || {}).ov; return ov === 'Y' ? true : ov === 'N' ? false : e.ok; })
-    .concat(a.extraEvidence.map(x => x.ok === 'Y' ? true : x.ok === 'N' ? false : null))
-    .concat(a.documents.map(d => d.supports === 'Y' ? true : d.supports === 'N' ? false : null));
+  /* Each DNA connection is its own piece of evidence: every GD comparison, every tester carrying the shared SNP,
+     every autosomal match. A "Consistent?" override on the Convergence step applies to all of that kind. */
+  const tgt = targetSNP(a);
+  const each = { str: () => a.gdPairs.map(p => pairEval(a, p).within),
+    snp: () => a.testers.filter(t => pathOf(t).length).map(t => tgt ? carriesSNP(t, tgt) : null),
+    auto: () => a.atMatches.map(autoEval).map(e => e.check ? e.check.ok : null) };
+  const vals = autoEvidence(a).flatMap(e => {
+    if (e.key === 'gen' && a.recordsLost) return [];
+    const ov = (a.conv[e.key] || {}).ov, items = each[e.key] ? each[e.key]() : [e.ok], list = items.length ? items : [e.ok];
+    return ov === 'Y' ? list.map(() => true) : ov === 'N' ? list.map(() => false) : list;
+  }).concat(a.extraEvidence.map(x => x.ok === 'Y' ? true : x.ok === 'N' ? false : null))
+    .concat(a.documents.map(d => d.supports === 'Y' ? true : d.supports === 'N' ? false : null))
+    /* Lost records: what cannot be tested is left out, so only the evidence that can be weighed is shown. */
+    .filter(v => !a.recordsLost || v != null);
   const parts = [
     { k: 'Supporting', n: vals.filter(v => v === true).length, c: 'var(--green)' },
     { k: 'Contrary', n: vals.filter(v => v === false).length, c: 'var(--red)' },
@@ -1315,7 +1383,8 @@ function convergenceChart(a) {
     const len = p.n / total * C, seg = `<circle cx="60" cy="60" r="${r}" fill="none" stroke="${p.c}" stroke-width="18" stroke-dasharray="${Math.max(len - gap, 0.5)} ${C}" stroke-dashoffset="${-off}"><title>${p.k}: ${p.n} of ${total}</title></circle>`;
     off += len; return seg;
   }).join('');
-  const pct = total ? Math.round(parts[0].n / total * 100) : 0;
+  /* The share of the tested evidence that supports the line; evidence not yet tested is shown but does not lower it. */
+  const tested = parts[0].n + parts[1].n, pct = tested ? Math.round(parts[0].n / tested * 100) : 0;
   return `<div class="conv-chart">
     <svg viewBox="0 0 120 120" width="150" height="150" role="img" aria-label="${parts.map(p => `${p.k} ${p.n}`).join(', ')}">
       <g transform="rotate(-90 60 60)">${arcs}</g>
@@ -1585,13 +1654,14 @@ function tabReport(a, sub) {
       /* Sections follow the research method: STR-first or SNP-first. */
       const docs = `
     <h2>Documents</h2>
-    ${simpleTable(['Type', 'Date', 'Place', 'Source', 'What it shows'], a.documents.map(d => [esc(d.type), esc(d.date), esc(d.place), esc(d.source), esc(d.notes)]))}`;
+    ${simpleTable(['Type', 'Date', 'Place', 'Source', 'What it shows'], a.documents.map(d => [esc(d.type), esc(d.date), esc(d.place), esc(d.source), esc(d.notes)]))}
+    ${a.recordsLost ? `<p><b>Lost records:</b> ${esc((a.recordsLostNote || 'The records for this line are lost').replace(/[.\s]+$/, ''))}. The conclusion rests on the DNA evidence.</p>` : ''}`;
       const snp = snpUsed(a) ? `<h2>SNP Structure</h2>
     <p>Shared SNP, where the testers' lines meet: <b>${esc(tgt || '—')}</b>${num(a.ftdnaDate) != null ? ` · FTDNA formation c. ${esc(a.ftdnaDate)}` : ''}${num(a.snpDocBirth) != null ? ` · Documented birth year of SNP: ${esc(a.snpDocBirth)}` : ''}</p>
     ${(() => { const seen = new Set(), list = []; a.testers.forEach(t => pathOf(t).forEach(s => { const k = normSNP(s), who = snpAssigned(s); if (who && !seen.has(k)) { seen.add(k); list.push(`${esc(s)} → ${esc(who)}`); } })); return list.length ? `<p>SNPs assigned to ancestors: ${list.join(' · ')}</p>` : ''; })()}
-    ${simpleTable(['Tester', 'Earliest ancestor', 'Terminal SNP', 'SNP path', 'Terminal SNP assigned to'], a.testers.map(t => [esc(testerLabel(t)), esc(t.line), esc(pathOf(t)[0] || '—'), esc(pathOf(t).join(' › ')), esc(snpAssigned(pathOf(t)[0] || '')) || '—']))}
+    ${simpleTable(['Tester', 'Earliest ancestor', 'Terminal SNP', 'SNP path', 'Terminal SNP assigned to'], a.testers.map(t => [esc(testerLabel(t)), esc(t.line || caseAncestor(a)), esc(pathOf(t)[0] || '—'), esc(pathOf(t).join(' › ')), esc(snpAssigned(pathOf(t)[0] || '')) || '—']))}
     <h2>Generational Estimation</h2>
-    ${simpleTable(['Tester', 'Tester birth year', 'SNPs', 'Generations', 'GPS', 'YPG', 'YPS', 'Shared SNP vs ancestor'], rows.map(r => [esc(testerLabel(r.t)), r.tb == null ? '—' : r.tb, r.snps == null ? '—' : r.snps, r.gens == null ? '—' : r.gens, fmt(r.gps), fmt(r.ypg), fmt(r.yps, 0), snpVsAncestor(r)]))}
+    ${simpleTable(['Tester', 'Tester birth year', 'SNPs', 'Generations', 'GPS', 'YPG', 'YPS', 'Shared SNP vs ancestor'], rows.map(r => [esc(testerLabel(r.t)), r.tb == null ? '—' : r.tb, r.snps == null ? '—' : r.snps, genText(r.t, r.gens), fmt(r.gps), fmt(r.ypg), fmt(r.yps, 0), snpVsAncestor(r)]))}
     ${rows.some(r => Number.isInteger(r.gens) && r.gens > 0) ? `<h2>Generation Chart</h2>${rows.map(r => reportGenChart(a, r)).join('')}
     ${reportKey([['anc', 'Ancestor'], ['snp', 'SNP (newest to oldest)'], ['pre', 'Before the ancestor']])}` : ''}` : '';
       const gd = `
@@ -1731,7 +1801,7 @@ function familyFit(a) {
 /* STR Analysis: the mutation rate setting for this family, with the best fit from its documented lines. */
 function familyRateCard(a) {
   const def = num(S.settings.rateCal) > 0 ? num(S.settings.rateCal) : RATE_CORRECTION, f = familyFit(a);
-  const rows = f.docs.map(d => { const q = pairGens(a, d.e); return `<tr><td>${esc(testerLabel(d.e.ta))} vs ${esc(testerLabel(d.e.tb))}</td><td class="calc">GD ${d.e.gd} on ${d.e.markers}</td><td class="calc">${d.G}</td><td class="calc">${q.mid} (${q.lo}–${q.hi})</td></tr>`; }).join('');
+  const rows = f.docs.map(d => { const q = pairGens(a, d.e); return `<tr><td>${esc(testerLabel(d.e.ta))} vs ${esc(testerLabel(d.e.tb))}</td><td class="calc">GD ${d.e.gd} on ${d.e.markers}</td><td class="calc">${d.e.ta.circa || d.e.tb.circa ? 'c. ' : ''}${d.G}</td><td class="calc">${q.mid} (${q.lo}–${q.hi})</td></tr>`; }).join('');
   return `<div class="card">
     <h3>Mutation rate setting for this family</h3>
     <p class="hint">Every family mutates a little faster or slower than average. The estimates use a setting of <b>${def}</b> (from Settings) unless you set one for this family. A lower setting gives longer estimates; a higher one gives shorter estimates.</p>
@@ -2304,10 +2374,10 @@ document.addEventListener('change', e => {
     if (!row) return;
     const oldKey = d.coll === 'gdPairs' ? pairKey(row) : null;
     if (d.coll === 'gdPairs') rememberPair(a, row);
-    row[d.k] = el.value;
+    row[d.k] = el.type === 'checkbox' ? el.checked : el.value;
     if (d.coll === 'gdPairs') { if (pairKey(row) !== oldKey) recallPair(a, row, oldKey); rememberPair(a, row); }
   } else if (d.anc && a) {
-    a[d.anc] = el.value;
+    a[d.anc] = el.type === 'checkbox' ? el.checked : el.value;
     /* The name, dates and place stay the same across all of an ancestor's tests. */
     if (view.page === 'ancestor' && ['name', 'birth', 'death', 'place'].includes(d.anc)) casesOf(a).forEach(x => { x[d.anc] = el.value; });
   } else if (d.pdiff && a) {
