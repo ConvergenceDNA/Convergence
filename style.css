@@ -75,7 +75,7 @@ p { margin: 0 0 .8em; }
 .crumb a { color: var(--accent); cursor: pointer; }
 .saved { font-size: 12px; color: var(--muted); transition: opacity .4s; }
 .saved.err { color: var(--red); }
-.main { padding: 26px 28px 60px; max-width: 1200px; width: 100%; }
+.main { padding: 26px 28px 60px; max-width: 1600px; width: 100%; }
 
 /* ---------- Common UI ---------- */
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; margin-bottom: 18px; }

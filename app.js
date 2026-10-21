@@ -139,6 +139,7 @@ function combinedReport(cs) {
 /* The record being edited: an ancestor, or a non-tester research case. */
 function rec() { return view.page === 'project' ? curProject() : cur(); }
 function lifeYears(a) {
+  if (a.gdPairs && originStudy(a)) return '';
   const b = a.birth ? a.birth : '?';
   const d = a.death ? a.death : '?';
   return (a.birth || a.death) ? `${b}–${d}` : '';
@@ -188,26 +189,38 @@ function genRow(a, t) {
   const snps = snpCountFor(t, tgt);
   const gens = num(t.generations);
   const tb = num(t.birth);
-  const ab = num(a.birth);
+  /* In a study of a family's origins, the ancestor is each tester's own earliest documented ancestor. */
+  const ab = originStudy(a) ? num(t.lineBirth) : num(a.birth);
   /* Each tester's own YPG = (tester birth year − ancestor birth year) ÷ generations.
      If it can't be calculated, the fallback YPG (Overview) or the default is used instead. */
   const docYPG = tb != null && ab != null && gens ? (tb - ab) / gens : null;
   const ypg = docYPG != null ? docYPG : lineageYPG(a);
   const ypgOwn = docYPG != null;
-  const gps = snps && gens != null ? gens / snps : null;
-  const yps = gps != null && ypg != null ? gps * ypg : null;
-  const years = gens != null && ypg != null ? gens * ypg : null;
+  /* A real father-to-son YPG falls between about 25 and 40 years. Outside that, the generations or a birth year are likely wrong. */
+  const ypgOK = docYPG == null ? null : docYPG >= 25 && docYPG <= 40;
   /* The shared SNP is where the testers' lines meet. It formed in the ancestor or in one of his forefathers, so FTDNA's date
      for it should fall at or before his birth (allowing one SNP interval for the uncertainty in FTDNA's date).
      diff = FTDNA's date − his birth year: negative means the SNP is older than him. */
   const ftdna = num(a.ftdnaDate);
   const diff = ab != null && ftdna != null ? ftdna - ab : null;
+  /* Above the documented ancestor there are no records, so those generations use the standard YPG, not the tester's own. */
+  const stdYPG = lineageYPG(a) || 33;
+  /* Generations to the shared SNP, when the researcher knows them: used as entered instead of being estimated. */
+  const snpGens = num(t.snpGens);
+  const gensBefore = snpGens != null && gens != null ? snpGens - gens : diff != null ? Math.round(-diff / stdYPG) : null;
+  /* The SNP count runs from the tester up to the shared SNP, so the generations must too:
+     the documented generations, plus those from the ancestor back to the SNP when it formed before him. */
+  const before = gensBefore > 0 ? gensBefore : 0;
+  const totalGens = snpGens != null ? snpGens : gens != null ? gens + before : null;
+  const years = snpGens != null ? (tb != null && ftdna != null ? tb - ftdna : snpGens * stdYPG) : gens != null && ypg != null ? gens * ypg + before * stdYPG : null;
+  const spanYPG = totalGens ? years / totalGens : ypg;
+  const gps = snps && totalGens != null ? totalGens / snps : null;
+  const yps = snps && years != null ? years / snps : null;
   const aligned = diff != null ? diff <= (yps || 0) : null;
-  const gensBefore = diff != null && ypg ? Math.round(-diff / ypg) : null;
   /* A tester whose terminal SNP is the shared SNP has no SNPs below it: that is not an error, so GPS is not judged. */
   /* A circa generation count is allowed one generation either way. */
-  const gpsOK = gps != null && snps > 1 ? (t.circa ? [gens - 1, gens, gens + 1] : [gens]).some(g => g / snps >= num(S.settings.gpsMin) && g / snps <= num(S.settings.gpsMax)) : null;
-  return { t, tgt, snps, gens, ypg, ypgOwn, gps, yps, years, tb, ftdna, diff, gensBefore, aligned, gpsOK, docYPG };
+  const gpsOK = gps != null && snps > 1 ? (t.circa ? [totalGens - 1, totalGens, totalGens + 1] : [totalGens]).some(g => g / snps >= num(S.settings.gpsMin) && g / snps <= num(S.settings.gpsMax)) : null;
+  return { t, tgt, snps, gens, snpGens, before, totalGens, ypg, ypgOwn, ypgOK, spanYPG, gps, yps, years, tb, ftdna, diff, gensBefore, aligned, gpsOK, docYPG };
 }
 
 /* Shared SNP vs the ancestor, in words: "c. 1450, about 4 generations before his birth". */
@@ -300,6 +313,7 @@ function snpStatus(a) {
   }
   if (ovr(a, 'gps') !== 'Y') {
     const rows = ts.map(t => genRow(a, t));
+    if (rows.some(r => r.ypgOK === false)) return { c: 'amber', msg: 'A tester\'s YPG is outside 25–40 years: check his generations and his ancestor\'s birth year.' };
     if (rows.some(r => r.gpsOK === false)) return { c: 'amber', msg: `A GPS value falls outside ${S.settings.gpsMin}–${S.settings.gpsMax}.` };
     if (!rows.length || rows.some(r => r.gps == null)) return { c: 'amber', msg: 'Add generations for each tester to check GPS.' };
   }
@@ -324,8 +338,8 @@ function genealogyStatus(a) {
   if (!a.documents.length) return { c: 'amber', msg: 'No documents recorded for this ancestor.' };
   if (snpUsed(a) && ovr(a, 'date') !== 'Y') {
     const rows = a.testers.filter(t => pathOf(t).length).map(t => genRow(a, t));
-    if (rows.some(r => r.aligned === false)) return { c: 'red', msg: 'FTDNA dates the shared SNP after the ancestor\'s birth, so his descendants should not all share it.' };
-    if (num(a.birth) == null) return { c: 'amber', msg: 'Add the ancestor\'s birth year so each tester\'s YPG can be calculated.' };
+    if (rows.some(r => r.aligned === false)) return { c: 'red', msg: originStudy(a) ? 'FTDNA dates the shared SNP after the birth of a tester\'s earliest documented ancestor, so the lines should not all share it.' : 'FTDNA dates the shared SNP after the ancestor\'s birth, so his descendants should not all share it.' };
+    if (originStudy(a) ? a.testers.some(t => pathOf(t).length && num(t.lineBirth) == null) : num(a.birth) == null) return { c: 'amber', msg: originStudy(a) ? 'Add the birth year of each tester\'s earliest documented ancestor (Testers & DNA) so his YPG can be calculated.' : 'Add the ancestor\'s birth year so each tester\'s YPG can be calculated.' };
     if (num(a.ftdnaDate) == null) return { c: 'amber', msg: 'Add FTDNA\'s formation date for the shared SNP (SNP Analysis) to test date alignment.' };
   }
   /* Genealogical evidence comes from the documents: each one is marked as supporting or contradicting the lineage. */
@@ -763,7 +777,7 @@ function reportGenChart(a, r) {
   const { G, T, before } = L;
   const gens = Array.from({ length: T }, (_, j) => rcCell(j + 1 === G ? 'anc' : j + 1 > G ? 'pre' : 'gen', j + 1)).join('');
   const snpRow = L.spans.length ? `<tr>${L.spans.map(sp => rcCell('snp', esc(sp.name) + (sp.year != null ? `<br><span style="font-size:11px;font-weight:400">c. ${sp.year}</span>` : ''), `colspan="${sp.len}" `)).join('')}</tr>` : '';
-  return rcLabel(`${esc(testerLabel(r.t))} · ${genText(r.t, G)} generations back to ${esc(a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}`) + rcTable(`<tr>${gens}</tr>${snpRow}`);
+  return rcLabel(`${esc(testerLabel(r.t))} · ${genText(r.t, G)} generations back to ${esc(originStudy(a) ? r.t.line || 'his earliest documented ancestor' : a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}`) + rcTable(`<tr>${gens}</tr>${snpRow}`);
 }
 /* GD chart for one STR comparison: generations back to the ancestor, with the GD estimate placed on them. */
 /* GD generation chart, shared by the ancestor's comparisons and the GD calculator. A is the documented generations (0 if unknown).
@@ -796,9 +810,9 @@ function renderReports() {
 /* Plain-language instructions for each step. */
 function guideFor(a, tab) {
   const G = {
-    intro: { q: 'What this test does', help: 'Start here. This page explains in plain words what this test is, what the words mean, and what you will do at each step. Read it through, then click Continue.' },
+    intro: { q: 'What this test does', help: 'An overview of how this test works and how Convergence uses its results. Review it before entering any data.' },
     checklist: { q: 'Before you start', help: 'Work through this checklist before collecting evidence. It makes sure the case is workable: you know which line you are testing, which testers descend from it and what records exist. Tick each item as you go; you can come back to it at any time.' },
-    testers: { q: 'Who are the testers?', help: 'Add each man who has taken a Y-DNA test and descends from this ancestor in the direct male line (father to son). For each one enter his own birth year, how many generations he is from the ancestor (his father is generation 1), the test he took and, if he has a Big Y-700, his SNP path from FamilyTreeDNA, starting with his terminal SNP and moving back in time. If you do not know a tester\'s birth year, use 1955, a typical birth year for today\'s Y-DNA testers.' },
+    testers: { q: 'Who are the testers?', help: originStudy(a) ? 'Add each man who has taken a Y-DNA test and belongs to the families in this study. For each one enter his own birth year, his earliest documented ancestor in the direct male line (father to son), how many generations he is from that ancestor (his father is generation 1), the test he took and, if he has a Big Y-700, his SNP path from FamilyTreeDNA, starting with his terminal SNP and moving back in time. If you do not know a tester\'s birth year, use 1955, a typical birth year for today\'s Y-DNA testers.' : 'Add each man who has taken a Y-DNA test and descends from this ancestor in the direct male line (father to son). For each one enter his own birth year, how many generations he is from the ancestor (his father is generation 1), the test he took and, if he has a Big Y-700, his SNP path from FamilyTreeDNA, starting with his terminal SNP and moving back in time. If you do not know a tester\'s birth year, use 1955, a typical birth year for today\'s Y-DNA testers.' },
     str: { q: 'How closely do the testers match on STRs?', help: 'STRs are the marker values in a Y-37, Y-67 or Y-111 test. Genetic Distance (GD) is how many steps apart two testers are on those markers: the smaller it is, the closer the relationship. Choose two testers, pick how many markers were compared and enter the GD from FamilyTreeDNA\'s Y-DNA Matches page. The app estimates how many generations back they connect. Add one comparison for each pair of testers.' },
     documents: { q: 'What do the records show?', help: 'Enter the paper trail for this ancestor and his line: births, baptisms, marriages, deaths, wills, deeds, census and church records. For each one, note where it came from and whether it supports or contradicts the lineage. The records build the family tree; the DNA tests it.' },
     alignment: { q: 'Does each tester\'s family tree match the DNA?', help: 'For each tester, compare his documented line with what the DNA shows. Enter his earliest documented ancestor and where the family lived. Choose <b>Yes</b> if the paper trail and the DNA agree, <b>No</b> if they do not, and note any gaps or conflicts, such as a missing generation or a possible non-paternal event (NPE).' },
@@ -869,7 +883,7 @@ const STR_INQUIRIES = [
     focus: 'Compare the new match with each known tester. The one with the lowest GD is most likely his line.',
     answer: 'e.g. "Closest to John\'s line: GD 1, against GD 4 to the others."' },
   { v: 's-when', q: 'How far back do these lines connect?',
-    needs: 'Two testers and their GD.',
+    needs: 'Two testers, their GD and the number of markers compared.',
     focus: 'Read the generations estimate for each comparison; the app converts it to years.',
     answer: 'e.g. "About 8 generations back, around the 1700s."' },
   { v: 's-brick', q: 'Who was the father of my brick-wall ancestor?',
@@ -882,8 +896,12 @@ const STR_INQUIRIES = [
     answer: 'e.g. "Yes: every pair connects about 10 generations back, about 2 above their brick walls."' },
   { v: 's-npe', q: 'Did a surname change or non-paternal event happen?',
     needs: 'A tester who expected to match a surname group.',
-    focus: 'Compare him with the group. A GD too high for a shared surname line (a distant match, GD 5+) points to a break in his line.',
+    focus: 'Compare him with the group. A GD above FamilyTreeDNA\'s match limit (more than 4 at 37 markers, 7 at 67, or 10 at 111) is too high for a shared surname line and points to a break in his line.',
     answer: 'e.g. "GD 9 on 67 markers: not related within the surname era; the break is in his line."' },
+  { v: 's-origin', q: 'Where did the family come from before immigrating?',
+    needs: 'A tester with an immigrant ancestor, plus matches whose earliest ancestors are known in the old country, with each one\'s location.',
+    focus: 'Compare the tester with each match. The matches with the lowest GD, and where their earliest ancestors lived, show where to search for the immigrant\'s origins.',
+    answer: 'e.g. "Closest matches, GD 1 and 2 on 111 markers, trace to Banffshire, Scotland."' },
   { v: 's-groups', q: 'Are these surname families related to each other?',
     needs: 'Testers from separate groups of the same surname.',
     focus: 'Compare testers across the groups. Close or intermediate matches mean the groups are related; only distant matches mean they are not, in recent times.',
@@ -898,6 +916,10 @@ STR_INQUIRIES.push({ v: 's-society', q: 'Can I prove this line to a lineage soci
   needs: 'The documented line from the applicant up to the qualifying ancestor, with sources for each generation, and the society\'s rules.',
   focus: 'On the Lineage Society step, prove each generation in turn. Where a link has no paper proof, the GD evidence from this case can support it, if the society accepts DNA.',
   answer: 'e.g. "Ready to submit: all 9 generations are proven."' });
+/* Questions about one ancestor. Every other Y-DNA question is about a family's origins and connections: there is no one ancestor
+   at the centre, so the research is named as a study and each tester is measured against his own earliest documented ancestor. */
+const ANCESTOR_QS = ['right', 'brick', 'society', 's-right', 's-brick', 's-society'];
+function originStudy(a) { return !!a && !autoFirst(a) && !!a.inquiry && !ANCESTOR_QS.includes(a.inquiry); }
 function inquiryList(a) { return snpFirst(a) ? INQUIRIES : autoFirst(a) ? AUTO_INQUIRIES : STR_INQUIRIES; }
 function inquiryOf(a) { return inquiryList(a).find(x => x.v === a.inquiry) || null; }
 /* STR-first: whether the GD comparisons entered so far answer the chosen question. */
@@ -934,14 +956,21 @@ function strInquiryStatus(a, inq, need, done, lead, no) {
       if (short.length) return lead(`${short.map(w => `${nm(w.x)}: the estimate (${w.x.q.lo}–${w.x.q.hi} generations) does not reach their brick walls at ${gl(w)}`).join('; ')}. Recheck the generations entered and the GD.`);
       /* Every pair's likely range takes in the brick-wall generation, so the lines fit one family connecting at or above it.
          GD estimates are not exact, so the documented generation only needs to fall inside the range. */
-      const at = w => [w.x.e.ta, w.x.e.tb].every(t => !t.line || t.line === caseAncestor(a)) && a.name ? `${esc(a.name)}'s generation (${gl(w)})` : `their brick walls (${gl(w)} generations)`;
+      const at = w => w.x.e.ta.line && w.x.e.ta.line === w.x.e.tb.line ? `${esc(w.x.e.ta.line)}'s generation (${gl(w)})` : `their brick walls (${gl(w)} generations)`;
       const pairs = W.map(w => `${nm(w.x)}: GD ${w.x.e.gd} on ${w.x.e.markers}, about ${w.x.q.mid} generations back (likely ${w.x.q.lo}–${w.x.q.hi}), which takes in ${at(w)}`).join('; ');
       return done(`Yes: every pair fits one family. ${pairs}.`);
     }
     case 's-brick':
       return lead(`Closest matches by GD: ${close}. Search these matches' family trees for the generation above the brick wall.`);
-    case 's-npe':
-      return far.length ? lead(`${far.map(desc).join('; ')}: too distant for a recent shared surname line. If they expected to match, the break is in one of these lines.`) : done('No break found: every comparison is a close or intermediate match.');
+    case 's-npe': {
+      /* FamilyTreeDNA's match limits: a GD above them is too distant for a shared surname line. */
+      const lim = x => ({ 37: 4, 67: 7, 111: 10 })[x.e.markers] ?? 4, br = P.filter(x => x.e.gd > lim(x));
+      return br.length ? lead(`${br.map(desc).join('; ')}: above FamilyTreeDNA's match limit for that number of markers, too distant for a recent shared surname line. If they expected to match, the break is in one of these lines.`) : done('No break found: every comparison is within FamilyTreeDNA\'s match limit.');
+    }
+    case 's-origin': {
+      const loc = [...best.entries()].filter(([t, b]) => b.o.location);
+      return loc.length ? lead(`Closest matches by GD and where they come from: ${loc.map(([t, b]) => `${esc(testerLabel(t))} → ${esc(testerLabel(b.o))}, ${esc(b.o.location)} (GD ${b.x.e.gd} on ${b.x.e.markers})`).join('; ')}. Search there for the immigrant's origins.`) : need('Add each tester\'s location on the Testers & DNA step to see where his closest matches come from.');
+    }
     case 's-groups':
       return far.length === P.length ? no(`Not related in recent times: ${P.map(desc).join('; ')}.`) : done(`Related: ${P.filter(x => x.e.group.key !== 'distant').map(desc).join('; ')}.`);
   }
@@ -978,7 +1007,7 @@ function inquiryStatus(a) {
       if (!tgt || yr == null || num(a.birth) == null || !rows.length) return need('Add the ancestor\'s birth year, the testers\' generations and SNP paths, and the FTDNA formation date of the shared SNP.');
       return rows.every(r => r.aligned) ? done(`Consistent: the shared SNP ${esc(tgt)} ${snpVsAncestor(rows[0]).replace(/^c\. \d+, /, 'formed ')}, as it should for the right man.`) : no(`Not consistent: the shared SNP ${esc(tgt)} formed c. ${yr}, after his birth, so he may not be the common ancestor.`);
     case 'when': {
-      if (!tgt || yr == null || !rows.length) return need('Add the testers\' generations and SNP paths, the ancestor\'s birth year and the FTDNA formation date of the shared SNP.');
+      if (!tgt || yr == null || !rows.length) return need('Add the testers\' generations and SNP paths, ' + (originStudy(a) ? 'the birth year of each tester\'s earliest documented ancestor' : 'the ancestor\'s birth year') + ' and the FTDNA formation date of the shared SNP.');
       const g = rows.map(r => r.gens + Math.max(0, r.gensBefore || 0)), lo = Math.min(...g), hi = Math.max(...g);
       return done(`The lines connect at ${esc(tgt)}, c. ${yr}: about ${lo === hi ? lo : lo + '–' + hi} generations back from the testers.`);
     }
@@ -1000,7 +1029,7 @@ function inquiryStatus(a) {
       const lo = Math.min(...walls), hi = Math.max(...walls), born = lo === hi ? `born ${lo}` : `born ${lo}–${hi}`;
       if (y > lo) return lead(`All ${paths.length} testers share ${esc(tgt)}, but FTDNA dates it c. ${y}, after the earliest brick-wall ancestor was born (${lo}). FTDNA dates are estimates with wide ranges, so the lines most likely connect close to the brick-wall generation. Check the date range on FTDNA Discover.`);
       const g = Math.round((lo - y) / (lineageYPG(a) || 33));
-      return done(`Yes: all ${paths.length} testers share ${esc(tgt)}, formed c. ${y}, before their brick-wall ancestors (${born}). Their lines connect in one family ${g >= 1 ? `about ${g} generation${g === 1 ? '' : 's'} above the brick walls` : 'at about the brick-wall generation'}.`);
+      return done(`Yes: all ${paths.length} testers share ${esc(tgt)}, formed c. ${y}, before their brick-wall ancestors. Their lines connect in one family ${g >= 1 ? `about ${g} generation${g === 1 ? '' : 's'} above the brick walls` : 'at about the brick-wall generation'}.`);
     }
     case 'brick':
       return cm.length ? lead(`Closest SNP matches: ${list}. Search these matches' family trees for the generation above the brick wall.`) : need('No two testers share an SNP yet; add matches whose trees go further back.');
@@ -1051,6 +1080,10 @@ function tabOverview(a) {
     /* Guided, one step per screen: each step explains what to do, then Back / Continue. */
     let k = Math.max(0, Math.min(2, view.ostep || 0));
     const steps = [
+      originStudy(a) ? { tab: 'Study', q: 'What is this study called?',
+        help: 'Your question is about a family\'s origins and connections, not one ancestor, so this research is named as a study. Give it a name that describes the families or surnames involved and the place they are linked to. Each tester\'s own earliest documented ancestor goes on the Testers & DNA step.',
+        body: `${field('Study name', 'name', a.name, { ph: 'e.g. Joass / Joyce of Banffshire' })}
+        ${field('Place', 'place', a.place, { ph: 'e.g. Banffshire, Scotland' })}` } :
       { tab: 'Ancestor', q: ancPrompt(a).q,
         help: ancPrompt(a).help,
         body: `${field('Name', 'name', a.name, { ph: 'e.g. Alexander Joyce' })}
@@ -1063,7 +1096,10 @@ function tabOverview(a) {
         <div class="field full"><div class="hint">${(METHODS.find(o => o.v === (a.method || '')) || METHODS[0]).best ? (METHODS.find(o => o.v === (a.method || '')) || METHODS[0]).best + '<br>' : ''}<b>Your steps:</b> ${tabsFor(a).slice(2).map(t => t[1]).join(' → ')}</div></div>` },
       { tab: 'Goal', q: 'What do you want to find out?',
         help: `Choose the question you want the ${snpFirst(a) ? 'SNP' : autoFirst(a) ? 'autosomal DNA' : 'STR marker'} evidence to answer. It decides what to look for and appears at the top of the report, with whether it has been answered. You can add your own notes below.`,
-        body: `<div class="field" style="grid-column:span 2"><label>Your question</label><select data-anc="inquiry"><option value="">— choose a question —</option>${inquiryList(a).map(o => `<option value="${o.v}"${a.inquiry === o.v ? ' selected' : ''}>${esc(o.q)}</option>`).join('')}</select></div>
+        body: `<div class="field" style="grid-column:span 2"><label>Your question</label><select data-anc="inquiry"><option value="">— choose a question —</option>${(() => {
+          const opt = o => `<option value="${o.v}"${a.inquiry === o.v ? ' selected' : ''}>${esc(o.q)}</option>`, L = inquiryList(a);
+          return autoFirst(a) ? L.map(opt).join('') : `<optgroup label="About one ancestor">${L.filter(o => ANCESTOR_QS.includes(o.v)).map(opt).join('')}</optgroup><optgroup label="About a family's origins and connections">${L.filter(o => !ANCESTOR_QS.includes(o.v)).map(opt).join('')}</optgroup>`;
+        })()}</select></div>
         ${inquiryOf(a) ? `<div class="field full"><div class="hint"><b>You need:</b> ${inquiryOf(a).needs}<br><b>What to look for:</b> ${inquiryOf(a).focus}<br><b>The answer looks like:</b> ${esc(inquiryOf(a).answer)}</div></div>` : ''}
         ${field('Your notes (optional)', 'notes', a.notes, { type: 'textarea', full: true, ph: 'e.g. John and Samuel Hartwell both believe they descend from William Hartwell' })}
         <details class="gd-doc" style="grid-column:1 / -1"><summary>More options</summary><div class="grid3" style="margin-top:8px">
@@ -1116,15 +1152,16 @@ const TEST_TYPES = ['Big Y-700', 'Y-111', 'Y-67', 'Y-37', 'SNP pack', 'Other'];
 function testTypes(a) { return snpFirst(a) ? ['Big Y-700'] : ['Y-111', 'Y-67', 'Y-37']; }
 function tabTesters(a) {
   return `<div class="card">
-    <div class="card-head"><h3>Testers descending from ${esc(a.name || 'this ancestor')}</h3></div>
-    <p class="hint"><b>Earliest documented ancestor</b> is filled in with the ancestor you entered on the Overview step. Change it only if a tester's paper trail stops at a later ancestor.${a.inquiry === 'bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor and his birth year.' : a.inquiry === 's-bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor, and in Generations back how many generations he is from that brick wall.' : ''}${snpFirst(a) ? '' : '<br><b>Generations back</b> is optional. If you know it, enter it: the app can then check the GD estimates against your records.'}<br><b>Circa</b>: tick it when the generations back are a close estimate rather than proven. It shows as "c. 10", and the checks allow one generation either way.<br><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
+    <div class="card-head"><h3>${originStudy(a) ? `Testers in this study${a.name && a.name !== 'New ancestor' ? ': ' + esc(a.name) : ''}` : `Testers descending from ${esc(a.name || 'this ancestor')}`}</h3></div>
+    <p class="hint">${originStudy(a) ? `<b>Earliest documented ancestor</b>: enter the earliest man each tester's paper trail reaches${snpFirst(a) ? ', and in <b>His birth year</b> that man\'s birth year' : ''}. <b>Generations back</b> counts from the tester to that man (the tester's father is generation 1).` : `<b>Earliest documented ancestor</b> is filled in with the ancestor you entered on the Overview step. Change it only if a tester's paper trail stops at a later ancestor.`}${snpFirst(a) ? '' : '<br><b>Generations back</b> is optional. If you know it, enter it: the app can then check the GD estimates against your records.'}<br><b>Circa</b>: tick it when the generations back are a close estimate rather than proven. It shows as "c. 10", and the checks allow one generation either way.${snpFirst(a) ? '<br><b>Generations to shared SNP</b> (optional): if you know how many generations the tester is from the man the shared SNP formed in, enter it. The app then uses it as entered instead of estimating it from FTDNA\'s date. <b>Generations back</b> is still the count to his earliest documented ancestor.' : ''}<br><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
     ${snpFirst(a) ? '<p class="hint"><b>SNP path</b>: enter the tester\'s terminal SNP, his newest one, in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open <b>Ancestral Path</b>. Copy the SNPs from his terminal SNP back toward this ancestor, separated by commas.</p>' : ''}
     ${editTable('testers', [
       { k: 'label', label: 'Tester', ph: 'e.g. John Hartwell' },
       { k: 'line', label: 'Earliest documented ancestor', w: 170, ph: 'e.g. William Hartwell', def: () => caseAncestor(a) },
-      ...(a.inquiry === 'bwall' ? [{ k: 'lineBirth', label: 'His birth year', type: 'number', w: 90, ph: 'e.g. 1715', def: r => r.line ? '' : (a.birth || '') }] : []),
+      ...(snpFirst(a) && originStudy(a) ? [{ k: 'lineBirth', label: 'His birth year', type: 'number', w: 90, ph: 'e.g. 1715', def: r => r.line ? '' : (a.birth || '') }] : []),
       { k: 'birth', label: 'Tester birth year', type: 'number', w: 100, ph: 'e.g. 1954' },
       { k: 'generations', label: snpFirst(a) ? 'Generations back' : 'Generations back (optional)', type: 'number', w: 90, ph: 'e.g. 10' },
+      ...(snpFirst(a) ? [{ k: 'snpGens', label: 'Generations to shared SNP', type: 'number', w: 100, ph: 'optional' }] : []),
       { k: 'circa', label: 'Circa', type: 'check', w: 60 },
       { k: 'test', label: 'Test', type: 'select', opts: testTypes(a) },
       snpFirst(a) && { k: 'path', label: 'SNP path (newest → oldest)', type: 'textarea', w: 230, ph: 'e.g. R-FTB42619, R-MF109215, R-Y11201' },
@@ -1204,7 +1241,7 @@ function ancLabel(x) { return `${x.name || 'Unnamed ancestor'}${lifeYears(x) ? '
 /* The case's ancestor as entered on the Overview step: the default earliest documented ancestor for each tester. */
 /* A tester's generations back, marked "c." when they are a close estimate rather than proven. */
 function genText(t, g = num(t.generations)) { return g == null ? '—' : `${t.circa ? 'c. ' : ''}${g}`; }
-function caseAncestor(a) { return a.name && a.name !== 'New ancestor' ? ancLabel(a) : ''; }
+function caseAncestor(a) { return !originStudy(a) && a.name && a.name !== 'New ancestor' ? ancLabel(a) : ''; }
 /* The ancestors a SNP is assigned to: set in each ancestor's Overview (Ancestral SNP and FTDNA formation date). */
 /* The year an SNP formed (FTDNA Discover), entered beside it on the tree; for the case's shared SNP this is the FTDNA formation date. */
 function snpYear(snp, a) {
@@ -1264,13 +1301,13 @@ function pairGens(a, e, k = rateCal(a)) {
 function snpLayout(a, r) {
   const G = r.gens, n = r.snps, p = pathOf(r.t);
   if (!Number.isInteger(G) || G < 1 || G > 60) return null;
-  const before = r.gensBefore > 0 ? Math.min(r.gensBefore, 60 - G) : 0, T = G + before;
+  const before = r.before > 0 ? Math.min(r.before, 60 - G) : 0, T = G + before;
   if (!Number.isInteger(n) || n < 1 || n > T) return { G, T, before, spans: [] };
   /* f[i] = generation in which SNP i formed; the oldest (shared) SNP is fixed at T. */
   const f = Array.from({ length: n }, (_, i) => {
     if (i === n - 1) return T;
     const y = p[i] ? snpYear(p[i], a) : null;
-    return y != null && r.tb != null && r.ypg ? Math.min(T - 1, Math.max(1, Math.round((r.tb - y) / r.ypg))) : null;
+    return y != null && r.tb != null && r.spanYPG ? Math.min(T - 1, Math.max(1, Math.round((r.tb - y) / r.spanYPG))) : null;
   });
   /* Undated SNPs: spread evenly between the dated ones on either side (generation 0 is the tester). */
   let last = -1;
@@ -1291,7 +1328,7 @@ function genChart(a, r) {
   const { G, T, before } = L;
   const cells = Array.from({ length: T }, (_, j) => `<div class="gdg${j + 1 === G ? ' aio-anc' : j + 1 > G ? ' gdg-pre' : ' gdg-in'}"><b>${j + 1}</b></div>`).join('');
   const snpRow = L.spans.map(sp => `<div class="gc-snp aio-snp" style="grid-row:2;grid-column:${sp.start} / span ${sp.len};min-width:0"><b>${esc(sp.name)}</b>${sp.year != null ? `<span>c. ${sp.year}</span>` : ''}</div>`).join('');
-  return `<div class="gc"><div class="aio-lab">${esc(testerLabel(r.t))} · ${G} generations back to ${esc(a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}</div>
+  return `<div class="gc"><div class="aio-lab">${esc(testerLabel(r.t))} · ${G} generations back to ${esc(originStudy(a) ? r.t.line || 'his earliest documented ancestor' : a.name || 'the ancestor')}${before ? ` · shared SNP about ${before} generation${before === 1 ? '' : 's'} before him` : ''}${r.gps != null ? ` · one SNP every ${fmt(r.gps, 1)} generations` : ''}</div>
     <div class="lin-scroll"><div style="display:grid;grid-template-columns:repeat(${T},minmax(28px,1fr));gap:3px">${cells}${snpRow}</div></div></div>`;
 }
 function tabSNP(a) {
@@ -1324,14 +1361,14 @@ function tabSNP(a) {
       <td style="white-space:nowrap">${esc(testerLabel(r.t))}</td>
       <td class="calc">${r.tb == null ? '—' : r.tb}</td>
       <td style="width:90px;min-width:80px"><input type="number" data-coll="testers" data-id="${esc(r.t.id)}" data-k="snpCount" value="${esc(r.t.snpCount || '')}" placeholder="${r.snps != null && num(r.t.snpCount) == null ? r.snps : 'auto'}"></td>
-      <td class="calc">${genText(r.t, r.gens)}</td>
-      <td class="calc">${fmt(r.gps)} ${r.gpsOK === false ? pill('amber', 'outside ' + S.settings.gpsMin + '–' + S.settings.gpsMax) : ''}</td>
-      <td class="calc">${fmt(r.ypg)}${r.ypgOwn ? '' : ' ' + pill('', 'fallback')}</td>
+      <td class="calc">${genText(r.t, r.gens)}${r.before ? ` + ${r.before}` : ''}${r.snpGens != null ? ' ' + pill('', 'entered') : ''}</td>
+      <td class="calc">${fmt(r.gps)} ${r.gpsOK === false ? pill('amber', 'outside ' + S.settings.gpsMin + '–' + S.settings.gpsMax) : r.snps === 1 && r.gps > num(S.settings.gpsMax) ? pill('amber', 'no SNPs of his own below the shared SNP yet') : ''}</td>
+      <td class="calc">${fmt(r.ypg)}${r.ypgOwn ? '' : ' ' + pill('', 'fallback')}${r.ypgOK === false ? ' ' + pill('amber', 'check generations or birth year') : ''}</td>
       <td class="calc">${fmt(r.years, 0)}</td>
       <td class="calc">${fmt(r.yps, 0)}</td>
       <td class="calc" style="white-space:normal;min-width:230px">${snpVsAncestor(r)}${r.aligned == null ? '' : ' ' + (r.aligned ? pill('green', 'consistent') : pill('red', 'formed after him'))}</td>
     </tr>`).join('') : '<tr><td class="empty" colspan="9">Add testers first.</td></tr>'}</tbody></table></div>
-    <p class="hint" style="margin-top:8px">SNP count is counted automatically from each tester's terminal SNP up to the shared SNP (inclusive); type a number to override. Expected GPS range: ${S.settings.gpsMin}–${S.settings.gpsMax}. Each tester's YPG is calculated from his own birth year, the ancestor's birth year and the generations between them. The shared SNP formed in the ancestor or one of his forefathers, so <b>FTDNA's formation date</b> (above) should fall at or before <b>his birth year</b>; a date up to one SNP interval (YPS) after his birth is still treated as consistent, because FTDNA's dates are estimates.</p>
+    <p class="hint" style="margin-top:8px">SNP count is counted automatically from each tester's terminal SNP up to the shared SNP (inclusive); type a number to override. <b>Generations</b> runs over the same span: the documented generations to the ancestor, plus (after the +) the generations from him back to the shared SNP when FTDNA dates it before his birth. Those extra generations use the standard YPG of ${lineageYPG(a) || 33}, because there are no records for them, unless you entered the tester's <b>Generations to shared SNP</b> on the Testers & DNA step (marked "entered"), which is then used as given. <b>Estimated years</b> and <b>YPS</b> cover the whole span. Expected GPS range: ${S.settings.gpsMin}–${S.settings.gpsMax}. Each tester's YPG is calculated from his own birth year, the ancestor's birth year and the documented generations between them; a YPG outside 25–40 years usually means the generations or a birth year need checking. The shared SNP formed in the ancestor or one of his forefathers, so <b>FTDNA's formation date</b> (above) should fall at or before <b>his birth year</b>; a date up to one SNP interval (YPS) after his birth is still treated as consistent, because FTDNA's dates are estimates.</p>
     <h3 style="margin-top:18px">Generation chart</h3>
     ${rows.map(r => genChart(a, r)).join('') || '<p class="muted">Add each tester\'s generations on the Testers & DNA step.</p>'}
     <div class="gdg-key"><span><i class="gdg-in"></i>Generation</span><span><i class="aio-anc"></i>Ancestor</span><span><i class="aio-snp"></i>SNP (newest to oldest)</span><span><i class="gdg-pre"></i>Before the ancestor</span><span class="muted">Generation 1 is the tester's father.</span></div>
