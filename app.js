@@ -642,11 +642,65 @@ function renderHome() {
   ${realAncestors().length ? `<div class="anc-cards">${cards}</div>` : '<p class="muted">No ancestors yet. Use Start here above, or the + beside Ancestors in the menu.</p>'}`;
 }
 
+/* A simple inheritance diagram for each test's Introduction. Squares are men, circles are women. */
+function introDiagram(m) {
+  const A = '#2f6b85', B = '#a8762f', L = '#c9c1b2', T = '#1f2b33', W = '#ffffff';
+  const man = (x, y, fill, ring) => `<rect x="${x - 18}" y="${y - 18}" width="36" height="36" rx="5" fill="${fill}" stroke="${ring || (fill === W ? L : fill)}" stroke-width="${ring ? 4 : 1.5}"/>`;
+  const woman = (x, y, fill) => `<circle cx="${x}" cy="${y}" r="18" fill="${fill}" stroke="${fill === W ? L : fill}" stroke-width="1.5"/>`;
+  const link = (x1, y1, x2, y2, h = 18, s = 44) => `<path d="M${x1} ${y1 + s} V${(y1 + y2) / 2 + 8} H${x2} V${y2 - h}" fill="none" stroke="${L}" stroke-width="2"/>`;
+  const txt = (x, y, s, c = T, w = 400, a = 'middle') => `<text x="${x}" y="${y}" text-anchor="${a}" font-size="13" font-weight="${w}" fill="${c}">${s}</text>`;
+  const svg = (w, h, body, label) => `<div class="intro-fig"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="${label}" style="width:100%;max-width:${w}px;height:auto;display:block;margin:14px auto 6px;font-family:inherit">${body}</svg></div>`;
+  if (m === 'SNP') {
+    return svg(640, 360, [
+      link(320, 40, 160, 150), link(320, 40, 320, 150), link(320, 40, 480, 150),
+      link(160, 150, 100, 260), link(160, 150, 220, 260), link(480, 150, 420, 260), link(480, 150, 540, 260),
+      man(320, 40, A), txt(320, 76, 'Ancestor'),
+      man(160, 150, A), txt(160, 186, 'Son'),
+      woman(320, 150, W), txt(320, 186, 'Daughter'),
+      man(480, 150, A, B), txt(480, 186, 'Son: new SNP appears', B, 600),
+      man(100, 260, A), txt(100, 296, 'Grandson'),
+      woman(220, 260, W), txt(220, 296, 'Granddaughter'),
+      man(420, 260, A, B), txt(420, 296, 'Grandson'),
+      man(540, 260, A, B), txt(540, 296, 'Grandson'),
+      man(40, 336, A), txt(66, 341, 'Carries the ancestor&#39;s Y-DNA', T, 400, 'start'),
+      man(290, 336, A, B), txt(316, 341, 'Also carries the new SNP', T, 400, 'start'),
+      woman(500, 336, W), txt(526, 341, 'No Y-DNA', T, 400, 'start')
+    ].join(''), 'Y-DNA passes from father to son, and a new SNP passes to all of one son&#39;s male descendants');
+  }
+  if (m === 'AUTO') {
+    const gg = [0, 1, 2, 3, 4, 5, 6, 7].map(i => 170 + i * 56), gp = [198, 310, 422, 534], pa = [254, 478], ys = [30, 120, 210, 300];
+    const node = (i, x, y, op) => (i % 2 ? woman : man)(x, y, `rgba(47,107,133,${op})`);
+    const out = [];
+    gp.forEach((x, i) => out.push(link(gg[i * 2], ys[0], x, ys[1], 18, 18), link(gg[i * 2 + 1], ys[0], x, ys[1], 18, 18)));
+    pa.forEach((x, i) => out.push(link(gp[i * 2], ys[1], x, ys[2], 18, 18), link(gp[i * 2 + 1], ys[1], x, ys[2], 18, 18)));
+    out.push(link(pa[0], ys[2], 366, ys[3], 18, 18), link(pa[1], ys[2], 366, ys[3], 18, 18));
+    gg.forEach((x, i) => out.push(node(i, x, ys[0], 0.3)));
+    gp.forEach((x, i) => out.push(node(i, x, ys[1], 0.5)));
+    pa.forEach((x, i) => out.push(node(i, x, ys[2], 0.75)));
+    out.push(man(366, ys[3], A), txt(366, ys[3] + 36, 'You', T, 600));
+    [['Great-grandparents', 'about 12.5% each'], ['Grandparents', '25% each'], ['Parents', '50% each']].forEach((r, i) =>
+      out.push(txt(8, ys[i] + 5, r[0], T, 600, 'start'), txt(600, ys[i] + 5, r[1], T, 400, 'start')));
+    return svg(720, 350, out.join(''), 'Autosomal DNA comes from every ancestor on both sides, about half as much each generation back');
+  }
+  /* STR-first */
+  const box = (x, y, vals, ch) => `<rect x="${x - 62}" y="${y - 20}" width="124" height="40" rx="6" fill="${W}" stroke="${ch != null ? B : A}" stroke-width="${ch != null ? 3 : 2}"/>` +
+    `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="15" fill="${T}">${vals.map((v, i) => i === ch ? `<tspan fill="${B}" font-weight="700">${v}</tspan>` : v).join(' &#183; ')}</text>`;
+  return svg(640, 345, [
+    link(320, 40, 170, 150, 20, 48), link(320, 40, 470, 150, 20, 48), link(170, 150, 170, 260, 20, 48), link(470, 150, 470, 260, 20, 48),
+    box(320, 40, [13, 24, 14]), txt(320, 80, 'Ancestor'),
+    box(170, 150, [13, 24, 14]), txt(170, 190, 'Son'),
+    box(470, 150, [13, 25, 14], 1), txt(470, 190, 'Son: one marker changes by a step', B, 600),
+    box(170, 260, [13, 24, 14]), txt(170, 300, 'Grandson A'),
+    box(470, 260, [13, 25, 14], 1), txt(470, 300, 'Grandson B'),
+    txt(320, 335, 'Grandson A and Grandson B differ by one step: Genetic Distance (GD) 1', T, 600)
+  ].join(''), 'STR marker numbers pass from father to son and sometimes change by one step');
+}
 /* The first step of every test: what the test is and what this section does, in plain paragraphs (the text is in learn.js). */
 function tabIntro(a) {
   const I = TEST_INTROS[a.method || ''] || TEST_INTROS[''];
   return `<div class="card intro-card"><h3>${esc(I.title)}</h3>
     <div class="help-h">What is this test?</div>${I.what.map(x => `<p>${esc(x)}</p>`).join('')}
+    ${introDiagram(a.method || '')}
     <div class="help-h">What this section does for you</div>${I.does.map(x => `<p>${esc(x)}</p>`).join('')}</div>`;
 }
 /* The first screen of a new ancestor: which DNA test, so the checklist and every step after it fit that test. */
