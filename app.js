@@ -364,7 +364,7 @@ function nextStep(a) {
   const needSNP = snpUsed(a) && !targetSNP(a) ? { tab: 'testers', text: 'Add the testers\' SNP paths so their SNP tree can be mapped.' } : null;
   const needSTR = !snpFirst(a) && a.testers.length > 1 && !a.gdPairs.length ? { tab: 'str', text: 'Compare testers with a Genetic Distance analysis.' } : null;
   if (!a.testers.length) return { tab: 'testers', text: 'Add the Y-DNA testers who descend from this ancestor.' };
-  if (a.testers.some(t => num(t.generations) == null || num(t.birth) == null)) return { tab: 'testers', text: 'Add the tester birth year and generations for every tester.' };
+  if (a.testers.some(t => (snpFirst(a) && num(t.generations) == null) || num(t.birth) == null)) return { tab: 'testers', text: snpFirst(a) ? 'Add the tester birth year and generations for every tester.' : 'Add the tester birth year for every tester.' };
   const first = snpFirst(a) ? needSNP : needSTR, second = snpFirst(a) ? needSTR : needSNP;
   if (first) return first;
   if (!a.documents.length && !a.recordsLost) return { tab: 'documents', text: 'Record historical documents for this ancestor.' };
@@ -1117,14 +1117,14 @@ function testTypes(a) { return snpFirst(a) ? ['Big Y-700'] : ['Y-111', 'Y-67', '
 function tabTesters(a) {
   return `<div class="card">
     <div class="card-head"><h3>Testers descending from ${esc(a.name || 'this ancestor')}</h3></div>
-    <p class="hint"><b>Earliest documented ancestor</b> is filled in with the ancestor you entered on the Overview step. Change it only if a tester's paper trail stops at a later ancestor.${a.inquiry === 'bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor and his birth year.' : a.inquiry === 's-bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor, and in Generations back how many generations he is from that brick wall.' : ''}<br><b>Circa</b>: tick it when the generations back are a close estimate rather than proven. It shows as "c. 10", and the checks allow one generation either way.<br><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
+    <p class="hint"><b>Earliest documented ancestor</b> is filled in with the ancestor you entered on the Overview step. Change it only if a tester's paper trail stops at a later ancestor.${a.inquiry === 'bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor and his birth year.' : a.inquiry === 's-bwall' ? ' For your question, enter each tester\'s own brick-wall ancestor, and in Generations back how many generations he is from that brick wall.' : ''}${snpFirst(a) ? '' : '<br><b>Generations back</b> is optional. If you know it, enter it: the app can then check the GD estimates against your records.'}<br><b>Circa</b>: tick it when the generations back are a close estimate rather than proven. It shows as "c. 10", and the checks allow one generation either way.<br><b>Tester birth year</b>: if you do not know it, use 1955, a typical birth year for today's Y-DNA testers.</p>
     ${snpFirst(a) ? '<p class="hint"><b>SNP path</b>: enter the tester\'s terminal SNP, his newest one, in <a href="https://discover.familytreedna.com/" target="_blank" rel="noopener">FamilyTreeDNA Discover</a> and open <b>Ancestral Path</b>. Copy the SNPs from his terminal SNP back toward this ancestor, separated by commas.</p>' : ''}
     ${editTable('testers', [
       { k: 'label', label: 'Tester', ph: 'e.g. John Hartwell' },
       { k: 'line', label: 'Earliest documented ancestor', w: 170, ph: 'e.g. William Hartwell', def: () => caseAncestor(a) },
       ...(a.inquiry === 'bwall' ? [{ k: 'lineBirth', label: 'His birth year', type: 'number', w: 90, ph: 'e.g. 1715', def: r => r.line ? '' : (a.birth || '') }] : []),
       { k: 'birth', label: 'Tester birth year', type: 'number', w: 100, ph: 'e.g. 1954' },
-      { k: 'generations', label: 'Generations back', type: 'number', w: 90, ph: 'e.g. 10' },
+      { k: 'generations', label: snpFirst(a) ? 'Generations back' : 'Generations back (optional)', type: 'number', w: 90, ph: 'e.g. 10' },
       { k: 'circa', label: 'Circa', type: 'check', w: 60 },
       { k: 'test', label: 'Test', type: 'select', opts: testTypes(a) },
       snpFirst(a) && { k: 'path', label: 'SNP path (newest → oldest)', type: 'textarea', w: 230, ph: 'e.g. R-FTB42619, R-MF109215, R-Y11201' },
