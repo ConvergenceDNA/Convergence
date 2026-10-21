@@ -317,3 +317,110 @@ const CHECKLISTS = {
     ]
   }
 };
+
+/* =========================================================
+   Plain-language help for beginners: the words used in each test,
+   an introduction to each test, and small steps for each screen.
+   ========================================================= */
+const PLAIN_TERMS = {
+  "DNA": "The instructions inside every cell of your body. You get half of yours from each parent.",
+  "Y-DNA": "A piece of DNA that only men have. A father passes it to his son almost unchanged, so it follows the surname line from father to son.",
+  "Tester": "A man who has taken a Y-DNA test.",
+  "Ancestor": "The person in the past you are trying to connect the testers to.",
+  "Generation": "One step from parent to child. A tester's father is 1 generation back, his grandfather 2, his great-grandfather 3.",
+  "Direct male line": "Father to son to grandson, with no women in between. This is the line Y-DNA follows.",
+  "Circa": "About. Tick it when a number is a close guess rather than proven, and it shows as \"c. 10\".",
+  "FamilyTreeDNA": "The company that does Y-DNA tests and shows the results on its website.",
+  "Research question": "What you want to find out, such as \"Is this ancestor the right man?\" The app tells you when the evidence answers it.",
+  "Big Y-700": "The most detailed Y-DNA test from FamilyTreeDNA. It finds a man's SNPs.",
+  "SNP": "Said \"snip\". A tiny, permanent change in Y-DNA. Once it appears in a man, all his sons, grandsons and so on carry it. Men who share an SNP descend from the same man.",
+  "SNP path": "A tester's list of SNPs, from his newest back to his oldest. It is like a family tree written in DNA. FamilyTreeDNA Discover shows it under Ancestral Path.",
+  "Terminal SNP": "A tester's newest SNP, the first one on his SNP path.",
+  "Shared SNP": "An SNP that two or more testers both carry. It shows where their family lines meet.",
+  "Formation date": "FamilyTreeDNA's estimate of the year an SNP first appeared. It is an estimate, not an exact date.",
+  "GPS": "Generations Per SNP: about how many generations pass between one new SNP and the next. Usually 3 to 5.",
+  "YPG": "Years Per Generation: the average number of years between a father's birth and his son's. Usually about 30 to 35.",
+  "STR marker": "A spot on the Y-DNA that is counted as a number, such as 13 or 24. The numbers are passed from father to son, but now and then one changes by a step.",
+  "Y-37 / Y-67 / Y-111": "Y-DNA tests that count 37, 67 or 111 markers. The more markers, the better the answer.",
+  "Genetic Distance (GD)": "How many steps apart two testers' marker numbers are. GD 0 means they are identical. The smaller the GD, the closer the relationship.",
+  "Mutation rate": "How often a marker's number changes. Some markers change often, some rarely. The app uses these rates to turn GD into generations.",
+  "Common ancestor": "The man two testers both descend from.",
+  "Autosomal DNA": "DNA from all your ancestors on both sides of your family, mixed together. Everyone has it, men and women.",
+  "Match": "Someone who shares DNA with you, which means you are related. Your testing company lists your matches.",
+  "Centimorgan (cM)": "The unit used to measure how much DNA two people share. The more cM, the closer the relatives.",
+  "Shared cM": "The total amount of DNA you and a match share, in centimorgans.",
+  "Longest segment": "The biggest single piece of DNA you share with a match. Your testing company shows it.",
+  "Relationship": "How two people are related, such as 2nd cousins.",
+  "Removed": "Cousins a generation apart. Your parent's 1st cousin is your 1st cousin once removed.",
+  "Generation chart": "A row of numbered boxes, one per generation back. The dark box is the ancestor from your records; the bronze box is where the DNA estimate falls.",
+  "Records": "Papers that prove family links: births, baptisms, marriages, deaths, wills, deeds, census and church records.",
+  "Source": "Where a record came from, such as a county will book or a church register.",
+  "Supports / Contradicts": "Whether a record agrees with the family line you are testing, or goes against it.",
+  "Lost records": "Records that no longer exist, for example after a courthouse fire. The app does not count them for or against the line.",
+  "Convergence": "When the DNA and the records point to the same answer. The more evidence that agrees, the stronger the conclusion.",
+  "Conflict": "When two pieces of evidence disagree. A conflict needs a reason, such as a mistake in a record or a wrong generation count.",
+  "Lineage society": "A society, such as the DAR, that you join by proving descent from a qualifying ancestor.",
+  "Qualifying ancestor": "The ancestor a lineage society application is based on, such as a Patriot.",
+  "Proof": "The record that shows a link, such as a birth record naming the parents."
+};
+
+/* An introduction to each test, written for an adult beginner. Each entry is one paragraph. */
+const TEST_INTROS = {
+  SNP: { title: "SNP-first: the Big Y-700 test",
+    what: [
+      "Y-DNA is passed from father to son nearly unchanged, so it traces the direct paternal line much as a surname does. About every three to five generations, a new permanent mutation called an SNP (pronounced \"snip\") arises in one man and is inherited by all of his male-line descendants, so every man who carries that SNP descends from him. FamilyTreeDNA's Big Y-700 test identifies a man's SNPs and arranges them in order of age; this sequence is his SNP path, and the most recent SNP on it is his terminal SNP. FamilyTreeDNA names each SNP (for example, BY12345) and estimates when it formed, known as its formation date. When two testers' paths are compared, the most recent SNP they share marks the point where their paternal lines converge."
+    ],
+    does: [
+      "Here you will enter each tester, his SNP path, and how many generations back his earliest documented ancestor is. The app lines up the paths like a family tree, finds the shared SNP, and estimates how many generations ago the testers' lines meet. It bases that estimate on two averages: generations per SNP (GPS), usually 3 to 5, and years per generation (YPG), usually 30 to 35. It then checks the estimate against your records. When the DNA and the records point to the same ancestor, that agreement is called convergence, and it is what makes a conclusion strong."
+    ] },
+  "": { title: "STR-first: the Y-37, Y-67 and Y-111 tests",
+    what: [
+      "Y-DNA passes from father to son nearly unchanged, following the direct paternal line much like a surname. The Y-37, Y-67 and Y-111 tests read 37, 67 or 111 STR markers, each recorded as a number such as 13 or 24. STR markers change much more frequently than SNPs, which makes them useful for comparing men related within the last few centuries. The difference between two testers' numbers is their Genetic Distance (GD): the lower the GD, the more recent their common ancestor. The app uses each marker's mutation rate to estimate how many generations back two testers connect."
+    ],
+    does: [
+      "Here you will enter each tester, how many generations back his earliest documented ancestor is, and the GD between each pair of testers from FamilyTreeDNA's Y-DNA Matches page. The app turns each GD into an estimate of how many generations back the two men connect, then checks that estimate against your records. When the DNA and the records point to the same ancestor, that agreement is called convergence, and it is what makes a conclusion strong."
+    ] },
+  AUTO: { title: "Autosomal-first: AncestryDNA, 23andMe, MyHeritage and Family Finder",
+    what: [
+      "Autosomal DNA is inherited from both parents and recombines in every generation, so each person carries a unique mix drawn from ancestors on all sides of the family. Because the amount inherited from any one ancestor roughly halves with each generation, autosomal tests such as AncestryDNA, 23andMe, MyHeritage and FamilyTreeDNA's Family Finder are most reliable within about five or six generations; beyond that, many genuine cousins share little or no detectable DNA. The testing company compares your results against its database and reports each match with the total shared DNA, measured in centimorgans (cM), and the longest shared segment. Together these figures point to a likely range of relationships, from close family to distant cousins, including cousins a generation apart, described as \"removed.\""
+    ],
+    does: [
+      "Here you will enter the matches who descend from your ancestor, how much DNA you share with each, and how many generations each of you is from that ancestor. The app checks whether the shared DNA fits the relationship your family trees show, estimates how far back you connect, and checks that against your records. When the DNA and the records point to the same ancestor, that agreement is called convergence, and it is what makes a conclusion strong."
+    ] }
+};
+
+/* Each screen in plain words: what it is for (shown on the Introduction), small steps, and the words used on it. */
+const STEP_HELP = {
+  checklist: { plain: "A list of things to have ready before you start.",
+    steps: ["Read each item on the list.", "Tick the ones you have done or understand.", "You do not need to tick them all. You can come back later.", "Click Continue when you are ready."], terms: ["Ancestor", "Records"] },
+  overview: { plain: "Choose what you want to find out, and enter the ancestor.",
+    steps: ["Choose your question from the list.", "Read \"You need\" to see what to gather.", "Click Continue.", "Type the ancestor's name, birth and death years and where he lived. Estimates are fine.", "Click Continue."], terms: ["Research question", "Ancestor", "Generation"] },
+  testers: { plain: "Add each man who took a Y-DNA test.",
+    steps: ["Click + Add tester for each man who tested.", "Type his name, or a label such as Tester A.", "Check the earliest documented ancestor. It is filled in for you.", "Type his birth year. Use 1955 if you do not know it.", "Under Generations back, count from his father (1) up to the ancestor.", "Tick Circa if that count is a close guess.", "Choose the test he took."],
+    snpSteps: ["Paste his SNP path from FamilyTreeDNA Discover: type his terminal SNP there and open Ancestral Path."],
+    terms: ["Tester", "Generation", "Circa", "Y-37 / Y-67 / Y-111"], snpTerms: ["Tester", "Generation", "Circa", "Big Y-700", "SNP path", "Terminal SNP", "FamilyTreeDNA"] },
+  snp: { plain: "The app draws the testers' SNPs as a tree and finds where their lines meet.",
+    steps: ["Look at the tree. Each box is an SNP, and the testers are listed under their own SNPs.", "Find the shared SNP, where the testers' lines meet. It is highlighted.", "If you know the man an SNP first appeared in, type his name beside it. This is optional.", "Enter FamilyTreeDNA's formation date for the shared SNP.", "Read the generation charts and the answer to your question."],
+    terms: ["SNP", "Shared SNP", "Formation date", "GPS", "YPG", "Generation chart"] },
+  str: { plain: "Compare the testers two at a time, using their Genetic Distance.",
+    steps: ["Click + Add comparison.", "Choose two testers.", "Choose how many markers were compared: 37, 67 or 111.", "Type the GD from FamilyTreeDNA's Y-DNA Matches page.", "Read the estimate: about how many generations back the two connect.", "Choose Yes under Consistent if that fits your family tree."],
+    terms: ["Genetic Distance (GD)", "STR marker", "Mutation rate", "Common ancestor", "Generation chart"] },
+  matches: { plain: "Add your DNA matches who descend from the ancestor.",
+    steps: ["Open your match list on your testing company's website.", "Click + Add match for each match who descends from the ancestor.", "Type the shared cM and the longest segment, as your testing company shows them.", "Count the generations from you up to the ancestor, and from the match up to the ancestor. A parent is 1.", "Type which of the ancestor's children the match descends from."],
+    terms: ["Match", "Centimorgan (cM)", "Shared cM", "Longest segment", "Generation"] },
+  auto: { plain: "The app checks whether the DNA you share fits each relationship.",
+    steps: ["Read each match's row.", "Consistent means the shared DNA fits the relationship your trees show.", "Outside the usual range means the tree needs a second look.", "Too small to rely on means the match shares too little DNA to count.", "Look at the generation charts and read the answer to your question."],
+    terms: ["Shared cM", "Relationship", "Removed", "Generation chart"] },
+  documents: { plain: "Enter the records that prove the family line.",
+    steps: ["Click + Add document for each record.", "Choose its type, and type its date and place.", "Type where it came from (the source).", "Type what it shows.", "Choose Supports if it backs up the line, or Contradicts if it goes against it.", "If the records were destroyed, tick Records for this line are lost."],
+    terms: ["Records", "Source", "Supports / Contradicts", "Lost records"] },
+  convergence: { plain: "See whether the DNA and the records agree.",
+    steps: ["Look at the chart: green supports the line, red goes against it, grey is not tested yet.", "Read the result for each kind of evidence.", "Change Consistent? only if you know better than the app.", "If something disagrees, add it under Conflicts with a possible reason."],
+    terms: ["Convergence", "Conflict"] },
+  society: { plain: "Set out the proof for a lineage society, one generation at a time.",
+    steps: ["Type the society's name and the qualifying ancestor.", "Add one row for each generation, from the applicant up to the qualifying ancestor.", "For each generation, enter the birth, marriage and death with their sources.", "Enter the proof that each person was the child of the next generation.", "Download it when every generation is proven."],
+    terms: ["Lineage society", "Qualifying ancestor", "Proof"] },
+  report: { plain: "A summary of the whole case to print or download.",
+    steps: ["Read the summary from top to bottom.", "Click Download (Word) to save it, or Print.", "Remember that new records or test results can change the result."],
+    terms: ["Convergence"] }
+};

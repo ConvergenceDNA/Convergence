@@ -474,7 +474,7 @@ function renderSidebar() {
 
 /* ---------- Render: main ---------- */
 const TABS = [
-  ['checklist', 'Pre-Research'], ['overview', 'Overview'], ['testers', 'Testers & DNA'], ['matches', 'Matches'], ['auto', 'Autosomal Analysis'], ['str', 'STR Analysis'], ['documents', 'Documents'],
+  ['intro', 'Introduction'], ['checklist', 'Pre-Research'], ['overview', 'Overview'], ['testers', 'Testers & DNA'], ['matches', 'Matches'], ['auto', 'Autosomal Analysis'], ['str', 'STR Analysis'], ['documents', 'Documents'],
   ['snp', 'SNP Analysis'], ['convergence', 'Convergence'], ['society', 'Lineage Society'], ['report', 'Report']
 ];
 /* Research method: STR-first (default) or SNP-first. The two swap the places of STR Analysis and SNP Analysis. */
@@ -642,6 +642,13 @@ function renderHome() {
   ${realAncestors().length ? `<div class="anc-cards">${cards}</div>` : '<p class="muted">No ancestors yet. Use Start here above, or the + beside Ancestors in the menu.</p>'}`;
 }
 
+/* The first step of every test: what the test is and what this section does, in plain paragraphs (the text is in learn.js). */
+function tabIntro(a) {
+  const I = TEST_INTROS[a.method || ''] || TEST_INTROS[''];
+  return `<div class="card intro-card"><h3>${esc(I.title)}</h3>
+    <div class="help-h">What is this test?</div>${I.what.map(x => `<p>${esc(x)}</p>`).join('')}
+    <div class="help-h">What this section does for you</div>${I.does.map(x => `<p>${esc(x)}</p>`).join('')}</div>`;
+}
 /* The first screen of a new ancestor: which DNA test, so the checklist and every step after it fit that test. */
 function chooseTestHTML(a) {
   const opts = [
@@ -669,7 +676,7 @@ function renderAncestor(a) {
   const guide = g ? `<div class="wiz-head"><div class="wiz-step">Step ${idx + 1} of ${list.length}</div><h2 class="wiz-q">${g.q}</h2><div class="wiz-help"><b>What to do:</b> ${g.help}</div></div>` : '';
   const nav = view.tab === 'overview' ? '' : `<div class="wiz-nav no-print">${prev ? `<button class="btn ghost" data-act="tab" data-tab="${prev[0]}">← Back</button>` : '<button class="btn ghost" data-act="back-test">← Back</button>'}${next ? `<button class="btn" data-act="tab" data-tab="${next[0]}">Continue to ${esc(next[1])} →</button>` : ''}</div>`;
   const body = {
-    checklist: tabChecklist, overview: tabOverview, documents: tabDocuments, testers: tabTesters, snp: tabSNP,
+    intro: tabIntro, checklist: tabChecklist, overview: tabOverview, documents: tabDocuments, testers: tabTesters, snp: tabSNP,
     str: tabSTR, alignment: tabAlignment, convergence: tabConvergence, society: tabSociety, report: tabReport, matches: tabMatches, auto: tabAuto
   }[view.tab] || tabOverview;
   return `
@@ -735,6 +742,7 @@ function renderReports() {
 /* Plain-language instructions for each step. */
 function guideFor(a, tab) {
   const G = {
+    intro: { q: 'What this test does', help: 'Start here. This page explains in plain words what this test is, what the words mean, and what you will do at each step. Read it through, then click Continue.' },
     checklist: { q: 'Before you start', help: 'Work through this checklist before collecting evidence. It makes sure the case is workable: you know which line you are testing, which testers descend from it and what records exist. Tick each item as you go; you can come back to it at any time.' },
     testers: { q: 'Who are the testers?', help: 'Add each man who has taken a Y-DNA test and descends from this ancestor in the direct male line (father to son). For each one enter his own birth year, how many generations he is from the ancestor (his father is generation 1), the test he took and, if he has a Big Y-700, his SNP path from FamilyTreeDNA, starting with his terminal SNP and moving back in time. If you do not know a tester\'s birth year, use 1955, a typical birth year for today\'s Y-DNA testers.' },
     str: { q: 'How closely do the testers match on STRs?', help: 'STRs are the marker values in a Y-37, Y-67 or Y-111 test. Genetic Distance (GD) is how many steps apart two testers are on those markers: the smaller it is, the closer the relationship. Choose two testers, pick how many markers were compared and enter the GD from FamilyTreeDNA\'s Y-DNA Matches page. The app estimates how many generations back they connect. Add one comparison for each pair of testers.' },
@@ -1015,10 +1023,10 @@ function tabOverview(a) {
     /* The test is chosen before the checklist, so the Tests question is not asked again here. */
     steps.shift();
     k = Math.min(k, steps.length - 1);
-    const s = steps[k], list = tabsFor(a), prev = list[0], next = list[2];
+    const s = steps[k], list = tabsFor(a), oi = list.findIndex(t => t[0] === 'overview'), prev = list[oi - 1], next = list[oi + 1];
     return `<div class="card wiz">
       <div class="wiz-prog">${steps.map((x, i) => `<button class="wiz-dot${i === k ? ' on' : i < k ? ' done' : ''}" data-act="ostep" data-n="${i}"><span class="od-num">${i < k ? '✓' : i + 1}</span>${x.tab}</button>`).join('')}</div>
-      <div class="wiz-step">Step 2 of ${list.length} · Part ${k + 1} of ${steps.length}</div>
+      <div class="wiz-step">Step ${oi + 1} of ${list.length} · Part ${k + 1} of ${steps.length}</div>
       <h3 class="wiz-q">${s.q}</h3>
       <div class="wiz-help"><b>What to do:</b> ${s.help}</div>
       <div class="grid3">${s.body}</div>
@@ -2461,7 +2469,7 @@ document.addEventListener('click', e => {
       if (!src) break;
       const c = fixAncestor({ id: uid(), pid: src.pid, name: src.name, birth: src.birth, death: src.death, place: src.place, method: el.dataset.m, testChosen: true });
       S.ancestors.push(c); saveData();
-      view = { page: 'ancestor', id: c.id, tab: 'checklist' }; render(); window.scrollTo(0, 0);
+      view = { page: 'ancestor', id: c.id, tab: 'intro' }; render(); window.scrollTo(0, 0);
       break;
     }
     case 'back-test': { const t = cur(); t.testChosen = false; saveData(); render(); window.scrollTo(0, 0); break; }
@@ -2494,7 +2502,7 @@ document.addEventListener('click', e => {
     case 'start-case': {
       const anc = fixAncestor({ id: uid(), name: 'New ancestor', method: el.dataset.m || '', testChosen: true });
       S.ancestors.push(anc); saveData();
-      view = { page: 'ancestor', id: anc.id, tab: 'checklist' }; render(); window.scrollTo(0, 0);
+      view = { page: 'ancestor', id: anc.id, tab: 'intro' }; render(); window.scrollTo(0, 0);
       break;
     }
     case 'start-project': {
@@ -2520,7 +2528,7 @@ document.addEventListener('click', e => {
     }
     case 'tab': view.tab = el.dataset.tab; render(); window.scrollTo(0, 0); break;
     case 'ostep': view.ostep = Number(el.dataset.n); render(); window.scrollTo(0, 0); break;
-    case 'choose-test': { const a = cur(); a.method = el.dataset.m; a.testChosen = true; saveData(); view.tab = 'checklist'; render(); window.scrollTo(0, 0); break; }
+    case 'choose-test': { const a = cur(); a.method = el.dataset.m; a.testChosen = true; saveData(); view.tab = 'intro'; render(); window.scrollTo(0, 0); break; }
     case 'add-row': if (a) { a[el.dataset.coll].push(newRow(el.dataset.coll)); saveData(); render(); } break;
     /* One comparison for every pair of testers not already compared; a pair compared before brings back its GD and markers. */
     case 'add-all-pairs': if (a) {
