@@ -220,7 +220,7 @@ function lineSummary(sig, lin) {
 /* The pull-down under each group's tree: one ancestral line with its description, or all lines together. */
 function showLine(sel) {
   const sig = sel.dataset.sig, lin = sel.value, box = sel.parentNode.querySelector('[data-line-view]');
-  box.innerHTML = lin ? `<p style="line-height:1.6;margin:0 0 12px">${lineSummary(sig, lin)}</p>${snpTree(sig, lin)}` : snpTree(sig);
+  box.innerHTML = lin ? `<p style="line-height:1.6;margin:0 0 12px">${lineSummary(sig, lin)}</p>${lineTree(lin)}` : snpTree(sig);
 }
 function lineageCard(sig, lin) {
   const men = menOf(lin), ts = testersOfLin(lin);
